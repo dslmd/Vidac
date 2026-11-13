@@ -49,11 +49,14 @@ if [ -z "${SKIP_PREFETCH:-}" ]; then
   say "预下载转写模型：$MODEL（第一次运行会从 Hugging Face 下载，之后离线可用）"
   .venv/bin/python - "$MODEL" <<'PY'
 import sys
-from huggingface_hub import snapshot_download
 sys.path.insert(0, ".")
-from vidac.asr import resolve_model
-repo = resolve_model(sys.argv[1])["mlx"]
-path = snapshot_download(repo)
+from vidac.asr import resolve_mlx_repo, resolve_model
+try:
+    path = resolve_mlx_repo(resolve_model(sys.argv[1])["mlx"])
+except Exception as exc:
+    print(f"模型预下载失败：{exc}", file=sys.stderr)
+    print("不影响安装，第一次打开视频时会再试一次。", file=sys.stderr)
+    sys.exit(0)
 print("已缓存到", path)
 PY
 fi
@@ -65,7 +68,8 @@ say "编译 Apple Intelligence 翻译组件"
 mkdir -p bin
 if ! command -v swiftc >/dev/null 2>&1; then
   echo "没有找到 swiftc。请先运行 xcode-select --install，再重新运行本脚本。翻译暂时不可用。" >&2
-elif swiftc -O -parse-as-library swift/apple_translate.swift -o bin/apple-translate; then
+elif swiftc -O -parse-as-library swift/apple_translate.swift -o bin/apple-translate 2>bin/build.log; then
+  rm -f bin/build.log
   if bin/apple-translate --check >/dev/null 2>bin/.check.log; then
     echo "Apple Intelligence 可用。"
   else
@@ -74,6 +78,7 @@ elif swiftc -O -parse-as-library swift/apple_translate.swift -o bin/apple-transl
   rm -f bin/.check.log
 else
   echo "编译失败（需要 macOS 26 和对应的 Xcode 命令行工具）。翻译暂时不可用，播放不受影响。" >&2
+  echo "swiftc 的报错保存在：$(pwd)/bin/build.log" >&2
 fi
 
 # ---- 6. 可选：Ollama 翻译服务（不用 Apple Intelligence 时的备选） ----

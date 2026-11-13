@@ -13,8 +13,4 @@ fi
 # 从 Finder 启动（build_app.sh 生成的 App）时 PATH 很短，找不到 brew 装的 ffmpeg / ffprobe
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 
-# brew 装的 libmpv 在 /opt/homebrew/lib（Intel Mac 是 /usr/local/lib），
-# python-mpv 用 ctypes 加载，需要告诉它去哪找。
-export DYLD_FALLBACK_LIBRARY_PATH="/opt/homebrew/lib:/usr/local/lib${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}"
-
 exec .venv/bin/python -m vidac "$@"

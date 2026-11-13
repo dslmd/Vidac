@@ -1,4 +1,5 @@
-"""播放器：mpv（libmpv）负责播放和窗口，字幕、状态和设置菜单用 osd-overlay 画在视频上。
+"""播放器：启动 mpv 程序负责播放和窗口（通过 JSON IPC 控制，见 mpvipc.py），
+字幕、状态和设置菜单用 osd-overlay 画在视频上。
 
 为什么不用 mpv 原生字幕轨：原生字幕要重新加载整个 .srt 才能刷新，边转写边更新很别扭。
 设置菜单也做成叠加层而不是独立窗口：内嵌 mpv 到 Qt/Tk 在 macOS 上不稳，叠加层纯键盘即可。
@@ -10,19 +11,12 @@ import logging
 import queue
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Optional
 
-try:
-    import mpv  # python-mpv，运行时需要 brew 装的 libmpv
-except OSError as exc:  # 找不到 libmpv.dylib
-    raise SystemExit(
-        f"加载 libmpv 失败：{exc}\n"
-        "请先 brew install mpv，并通过 run.sh 启动（它会设置 DYLD_FALLBACK_LIBRARY_PATH）。"
-    )
-
-from . import ipc, media
+from . import ipc, media, mpvipc
 from .asr import MODEL_PRESETS, make_backend
 from .filters import is_filler
 from .positions import PositionStore
@@ -37,6 +31,7 @@ W, H = 1280, 720          # 叠加层坐标系，mpv 会按视频实际尺寸缩
 SUB_ID, STATUS_ID, MENU_ID = 1, 2, 3
 BASE_FONT = 40
 WHITE, YELLOW = "FFFFFF", "00FFFF"  # ASS 颜色是 BGR，所以 00FFFF 是黄色
+HINT_SECONDS = 10.0   # 提示类状态行显示这么久后自动隐藏
 HELP_TEXT = "Tab 菜单 · v 字幕模式 · +/- 字号 · t 切换音轨 · o 打开 · 空格 播放/暂停"
 
 DISPLAY_MODES = ("off", "orig", "trans", "bilingual")
@@ -107,13 +102,13 @@ def _player_options(args) -> dict:
         "input_default_bindings": True,
         "input_vo_keyboard": True,
         "osc": True,
-        "idle": "once",
+        "idle": "yes",   # 不用 once：拖进打不开的文件时 mpv 不会跟着退出
         "force_window": "yes",
         "keep_open": "yes",
         "ytdl": "no",
         "title": "vidac",
         "aid": str(args.audio_track),
-        "input_ipc_server": ipc.socket_path(),
+        "log_file": str(app_dir() / "mpv.log"),  # mpv 自己不往终端输出，出问题看这个文件
     }
     for kv in args.mpv_opt:
         key, _, value = kv.partition("=")
@@ -123,13 +118,6 @@ def _player_options(args) -> dict:
 
 MENU_KEYS = {"UP": "up", "DOWN": "down", "LEFT": "left", "RIGHT": "right",
              "ENTER": "right", "ESC": "close"}  # TAB 由 toggle 处理（菜单开着时等于关闭）
-
-
-def _menu_key_handler(events: queue.Queue, action: str):
-    def handler(state="d-", *_):
-        if state[:1] in ("d", "p"):
-            events.put(("menu", action))
-    return handler
 
 
 def cue_lines(cues: list[Cue], mode: str) -> list[str]:
@@ -162,12 +150,12 @@ class App:
         self.track = 0
         self.transcriber: Optional[Transcriber] = None
         self.translator: Optional[Translator] = None
-        self.speed = 1.0
         self.error_msg: Optional[str] = None   # 打开文件时的错误，例如不是本地文件
         self.sub_error: Optional[str] = None   # 字幕不可用的原因（视频照常播放）
         self.rebuild = args.rebuild
         self.retranslate = bool(args.retranslate or args.rebuild)
-        self.complete_at: Optional[float] = None
+        self._hints: dict[str, tuple[str, float]] = {}   # 提示类状态行：键 -> (文字, 首次出现时间)
+        self._hints_lock = threading.Lock()
         self.help_until = time.monotonic() + 8
         self.last_sub_text: Optional[str] = None
         self.last_status: Optional[list[str]] = None
@@ -183,25 +171,29 @@ class App:
         self._ignore_aid_until = 0.0
         self._last_err: Optional[str] = None
 
-        self.player = mpv.MPV(**_player_options(args))
+        self.player = mpvipc.MPV(ipc.socket_path(), **_player_options(args))
         self._bind_keys()
 
     # ---- 按键、属性和文件事件（回调在 mpv 线程，只往队列里放） ----
     def _bind_keys(self) -> None:
         p = self.player
-        p.on_key_press("v")(lambda: self.events.put(("subs",)))
-        p.on_key_press("+")(lambda: self.events.put(("scale", 0.1)))
-        p.on_key_press("=")(lambda: self.events.put(("scale", 0.1)))
-        p.on_key_press("-")(lambda: self.events.put(("scale", -0.1)))
-        p.on_key_press("o")(lambda: self.events.put(("dialog",)))
-        p.on_key_press("TAB")(lambda: self.events.put(("menu_toggle",)))
-        p.on_key_press("t")(lambda: self.events.put(("cycle_audio",)))
+        put = self.events.put
+        keys = {
+            "v": lambda: put(("subs",)),
+            "+": lambda: put(("scale", 0.1)),
+            "=": lambda: put(("scale", 0.1)),
+            "-": lambda: put(("scale", -0.1)),
+            "o": lambda: put(("dialog",)),
+            "TAB": lambda: put(("menu_toggle",)),
+            "t": lambda: put(("cycle_audio",)),
+        }
         if self.settings.get("trackpad"):
             # 覆盖 mpv 默认的滚轮绑定（默认左右各 10 秒）。触控板两指滑动会发出这些键
-            p.on_key_press("WHEEL_LEFT")(lambda: self.events.put(("swipe", -SWIPE_SECONDS)))
-            p.on_key_press("WHEEL_RIGHT")(lambda: self.events.put(("swipe", SWIPE_SECONDS)))
-            p.on_key_press("WHEEL_UP")(lambda: self.events.put(("vol", VOLUME_STEP)))
-            p.on_key_press("WHEEL_DOWN")(lambda: self.events.put(("vol", -VOLUME_STEP)))
+            keys["WHEEL_LEFT"] = lambda: put(("swipe", -SWIPE_SECONDS))
+            keys["WHEEL_RIGHT"] = lambda: put(("swipe", SWIPE_SECONDS))
+            keys["WHEEL_UP"] = lambda: put(("vol", VOLUME_STEP))
+            keys["WHEEL_DOWN"] = lambda: put(("vol", -VOLUME_STEP))
+        p.set_keys("vidac", keys)
 
         @p.property_observer("path")
         def _on_path(_name, value):
@@ -229,6 +221,7 @@ class App:
         finally:
             self._safe(self._save_position, True)
             self._stop_workers()
+            self.player.terminate()
 
     def _core_down(self) -> bool:
         try:
@@ -303,7 +296,8 @@ class App:
         self._stop_workers()
         self.error_msg = None
         self.sub_error = None
-        self.complete_at = None
+        with self._hints_lock:
+            self._hints.clear()             # 换视频，提示重新计时
         self.file_ready = False
         self.last_pos = None
         self.last_saved_pos = None
@@ -311,7 +305,7 @@ class App:
         if not p.is_file():
             self.video = None
             self.tracks = []
-            self.error_msg = f"不是本地文件：{path}"
+            self._set_error(f"不是本地文件：{path}")
             return
         self.video = p.resolve()
         try:
@@ -409,7 +403,6 @@ class App:
             rebuild=self.rebuild,
         )
         self.rebuild = False  # --rebuild 只对启动时的第一条音轨生效
-        self.complete_at = None
         self.transcriber.start()
         log.info("转写线程启动：音轨 %d", self.track + 1)
 
@@ -461,16 +454,17 @@ class App:
         self.menu_open = True
         self.menu_sel = 0
         self.last_menu = None
-        for keydef, action in MENU_KEYS.items():
-            self.player.register_key_binding(keydef, _menu_key_handler(self.events, action))
+        self.player.set_keys("vidac-menu", {
+            keydef: (lambda a=action: self.events.put(("menu", a)))
+            for keydef, action in MENU_KEYS.items()
+        })
 
     def _close_menu(self) -> None:
         if self.menu_open:
-            for keydef in MENU_KEYS:
-                try:
-                    self.player.unregister_key_binding(keydef)
-                except Exception:
-                    pass
+            try:
+                self.player.clear_keys("vidac-menu")
+            except Exception:
+                pass
         self.menu_open = False
         self.last_menu = None
         self._clear(MENU_ID)
@@ -518,7 +512,7 @@ class App:
             self._restart_workers()
         elif key == "track":
             if len(self.tracks) < 2:
-                self.error_msg = "这个文件只有一条音轨"
+                self._set_error("这个文件只有一条音轨")
                 return
             idx = (self.track + delta) % len(self.tracks)
             self.player.aid = idx + 1
@@ -528,11 +522,11 @@ class App:
             self._restart_translator()
         elif key == "translate_model":
             if s.get("translate_engine") == "apple":
-                self.error_msg = "Apple Intelligence 只有一个系统模型，不能切换"
+                self._set_error("Apple Intelligence 只有一个系统模型，不能切换")
                 return
             models = self.translator.models if self.translator is not None else []
             if not models:
-                self.error_msg = "翻译服务未连接，无法切换翻译模型"
+                self._set_error("翻译服务未连接，无法切换翻译模型")
                 return
             cur = s.get("translate_model")
             i = models.index(cur) if cur in models else -1
@@ -545,14 +539,21 @@ class App:
         elif key == "window":
             self._menu_window(delta)
         elif key == "speed":
-            i = SPEED_CHOICES.index(self.speed) if self.speed in SPEED_CHOICES else 2
-            self.speed = SPEED_CHOICES[(i + delta) % len(SPEED_CHOICES)]
-            self.player.speed = self.speed
+            cur = self._speed()
+            i = min(range(len(SPEED_CHOICES)), key=lambda k: abs(SPEED_CHOICES[k] - cur))
+            self.player.speed = SPEED_CHOICES[(i + delta) % len(SPEED_CHOICES)]
 
     def _set_scale(self, value: float) -> None:
         new = min(3.0, max(0.5, round(value, 2)))
         self.settings.set("font_scale", new)
         self.last_sub_text = None
+
+    def _speed(self) -> float:
+        """mpv 当前倍速（用户用 [ ] 改过也对）；读不到按 1 倍。"""
+        try:
+            return float(self.player.speed or 1.0)
+        except Exception:
+            return 1.0
 
     def _window_scale(self) -> Optional[float]:
         """mpv 当前的窗口缩放倍数；读不到（窗口还没建好等）返回 None。"""
@@ -565,7 +566,7 @@ class App:
     def _menu_window(self, delta: int) -> None:
         cur = self._window_scale()
         if cur is None:
-            self.error_msg = "读不到窗口大小，无法修改"
+            self._set_error("读不到窗口大小，无法修改")
             return
         i = min(range(len(WINDOW_SCALES)), key=lambda k: abs(WINDOW_SCALES[k] - cur))
         self.player.current_window_scale = WINDOW_SCALES[(i + delta) % len(WINDOW_SCALES)]
@@ -598,7 +599,7 @@ class App:
                 cur = self._window_scale()
                 value = f"{round(cur * 100)}%" if cur else "-"
             else:
-                value = f"{self.speed:g}x"
+                value = f"{round(self._speed(), 2):g}x"
             rows.append((MENU_LABELS[key], value))
         return rows
 
@@ -651,6 +652,7 @@ class App:
                 self._overlay(MENU_ID, menu_ass(rows, self.menu_sel, footer))
 
     def _translate_status_line(self) -> Optional[str]:
+        """翻译状态的一行文字。菜单底部始终显示它；画面左上角的状态行只在进行中和刚变化时显示。"""
         tr = self.translator
         if tr is None or not self.settings.get("translate"):
             return None
@@ -668,9 +670,34 @@ class App:
             return f"翻译出错：{tr.error_msg}"
         return None
 
+    def _translate_in_progress(self) -> bool:
+        tr, ts = self.translator, self.transcriber
+        if tr is None or tr.status != "ok":
+            return False
+        if tr.translated < tr.total:
+            return True
+        return ts is not None and not ts.complete and ts.error is None
+
+    def _set_error(self, msg: str) -> None:
+        self.error_msg = msg
+        with self._hints_lock:
+            self._hints.pop("error_msg", None)   # 同样的提示再次出现时重新计时
+
+    def _hint(self, key: str, text: str, now: float, seen: set) -> bool:
+        """提示类的行：第一次出现后显示 HINT_SECONDS 秒，之后返回 False。文字变了重新计时。"""
+        with self._hints_lock:
+            old = self._hints.get(key)
+            if old is None or old[0] != text:
+                old = self._hints[key] = (text, now)
+            seen.add(key)
+            return now - old[1] < HINT_SECONDS
+
     def _status_lines(self) -> list[str]:
+        now = time.monotonic()
         lines: list[str] = []
-        if self.error_msg:
+        seen: set[str] = set()
+        err_shown = bool(self.error_msg) and self._hint("error_msg", self.error_msg, now, seen)
+        if err_shown:
             lines.append(self.error_msg)
         if self.sub_error:
             lines.append(f"字幕不可用：{self.sub_error}（视频照常播放）")
@@ -681,22 +708,29 @@ class App:
             else:
                 done, total = tr.progress()
                 head = f"字幕 {tr.language or '检测中'} · {tr.model} · 音轨{tr.track + 1}"
-                if tr.complete:
-                    if self.complete_at is None:
-                        self.complete_at = time.monotonic()
-                    if time.monotonic() - self.complete_at < 5:
-                        lines.append(f"{head} · 已完成")
+                if tr.model_loading:
+                    lines.append("正在加载识别模型（第一次需要下载，请稍等）")
+                elif tr.complete:
+                    text = f"{head} · 已完成"
+                    if self._hint("transcribe_done", text, now, seen):
+                        lines.append(text)
                 else:
                     lines.append(f"{head} · {done}/{total} 段")
-            if tr.warning:
+            if tr.warning and self._hint("transcribe_warning", tr.warning, now, seen):
                 lines.append(tr.warning)
         translate_line = self._translate_status_line()
         if translate_line:
-            lines.append(translate_line)
-        if self.video is None and not self.error_msg:
+            if self._translate_in_progress():
+                lines.append(translate_line)
+            elif self._hint("translate", translate_line, now, seen):
+                lines.append(translate_line)
+        if self.video is None and not err_shown:
             lines.append("把视频拖进窗口，或按 o 打开")
-        if time.monotonic() < self.help_until:
+        if now < self.help_until:
             lines.append(HELP_TEXT)
+        with self._hints_lock:   # 不再出现的提示清掉，下次出现重新计时
+            for k in [k for k in self._hints if k not in seen]:
+                del self._hints[k]
         return lines
 
     def _overlay(self, oid: int, data: str) -> None:

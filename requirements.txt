@@ -1,4 +1,3 @@
 # 默认依赖（Apple Silicon）
 mlx-whisper>=0.4.3
-python-mpv>=1.0.8
 numpy>=1.26

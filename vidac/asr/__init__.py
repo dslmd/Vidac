@@ -7,26 +7,75 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import platform
+from typing import Callable, Optional
 
 from .base import Backend, Segment
 
-MODEL_PRESETS: dict[str, dict[str, str]] = {
-    "tiny":           {"mlx": "mlx-community/whisper-tiny",           "faster": "tiny"},
-    "base":           {"mlx": "mlx-community/whisper-base-mlx",       "faster": "base"},
-    "small":          {"mlx": "mlx-community/whisper-small-mlx",      "faster": "small"},
-    "medium":         {"mlx": "mlx-community/whisper-medium-mlx",     "faster": "medium"},
-    "large-v3":       {"mlx": "mlx-community/whisper-large-v3-mlx",   "faster": "large-v3"},
-    "large-v3-turbo": {"mlx": "mlx-community/whisper-large-v3-turbo", "faster": "large-v3-turbo"},
+# mlx 值是候选仓库名列表，按顺序解析（先找本地已有的，再联网依次尝试）。
+# 只有 mlx-community/whisper-tiny 确认存在，其余名字没有验证过，所以每个预设都留了备用名。
+MODEL_PRESETS: dict[str, dict] = {
+    "tiny":           {"mlx": ["mlx-community/whisper-tiny", "mlx-community/whisper-tiny-mlx"],
+                       "faster": "tiny"},
+    "base":           {"mlx": ["mlx-community/whisper-base-mlx", "mlx-community/whisper-base"],
+                       "faster": "base"},
+    "small":          {"mlx": ["mlx-community/whisper-small-mlx", "mlx-community/whisper-small"],
+                       "faster": "small"},
+    "medium":         {"mlx": ["mlx-community/whisper-medium-mlx", "mlx-community/whisper-medium"],
+                       "faster": "medium"},
+    "large-v3":       {"mlx": ["mlx-community/whisper-large-v3-mlx", "mlx-community/whisper-large-v3"],
+                       "faster": "large-v3"},
+    "large-v3-turbo": {"mlx": ["mlx-community/whisper-large-v3-turbo", "mlx-community/whisper-turbo"],
+                       "faster": "large-v3-turbo"},
 }
 
 BACKENDS = ("auto", "mlx", "faster", "fake")
 
 
-def resolve_model(model: str) -> dict[str, str]:
+def resolve_model(model: str) -> dict:
+    """预设名返回候选列表；直接写仓库名（或本地目录）时候选就是那一个。"""
     if model in MODEL_PRESETS:
         return MODEL_PRESETS[model]
-    return {"mlx": model, "faster": model}
+    return {"mlx": [model], "faster": model}
+
+
+def _looks_complete(path: str) -> bool:
+    """本地目录里要有配置和权重，中断的下载不算。不是真实目录（测试里的假路径）不检查。"""
+    if not os.path.isdir(path):
+        return True
+    names = set(os.listdir(path))
+    return "config.json" in names and bool(names & {"weights.safetensors", "weights.npz"})
+
+
+def resolve_mlx_repo(candidates: list[str], download: Optional[Callable] = None) -> str:
+    """把候选仓库名解析成本地模型目录，不依赖 mlx。
+
+    先用 local_files_only 找本地已有的；都没有再联网依次尝试，用第一个成功的。
+    download 默认是 huggingface_hub.snapshot_download，测试里可以换成假的。
+    """
+    if download is None:
+        from huggingface_hub import snapshot_download as download
+    for repo in candidates:
+        if os.path.isdir(repo):
+            return repo  # --model 直接给了本地目录
+    for repo in candidates:
+        try:
+            path = download(repo, local_files_only=True)
+        except Exception:
+            continue
+        if _looks_complete(str(path)):
+            return str(path)
+    errors = []
+    for repo in candidates:
+        try:
+            return str(download(repo))
+        except Exception as exc:
+            errors.append(f"{repo}（{type(exc).__name__}: {exc}）")
+    raise RuntimeError(
+        "下载识别模型失败，试过：" + "；".join(errors)
+        + "。第一次运行需要联网；也可以用 --model 指定仓库名，例如 --model mlx-community/whisper-tiny"
+    )
 
 
 def pick_backend(kind: str) -> str:
@@ -56,4 +105,5 @@ def make_backend(kind: str, model: str) -> Backend:
     raise ValueError(f"未知后端：{kind}")
 
 
-__all__ = ["Backend", "Segment", "MODEL_PRESETS", "make_backend", "resolve_model", "pick_backend"]
+__all__ = ["Backend", "Segment", "MODEL_PRESETS", "make_backend", "resolve_model",
+           "resolve_mlx_repo", "pick_backend"]

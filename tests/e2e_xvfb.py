@@ -8,7 +8,8 @@
 SAMPLES_DIR 里需要 ja_180s.mp4 和 multi_audio.ts（scripts/make_samples.sh 生成）。
 
 阶段：
-  A   没有翻译服务：视频照常播放，原文字幕出现，状态行显示翻译服务未连接；
+  A   没有翻译服务：视频照常播放，原文字幕出现，加载模型期间状态行提示正在加载，
+      状态行显示翻译服务未连接并在约 10 秒后消失（菜单底部仍显示）；
       --backend mlx（沙箱里没有 mlx）：播放照常，状态行显示字幕不可用
   B   mock 翻译服务：译文逐步出现，批大小、前文、术语表；v 循环四种模式；
       拖动优先转写；Tab 菜单导航修改字号并保存；菜单关闭后方向键恢复
@@ -19,6 +20,8 @@ SAMPLES_DIR 里需要 ja_180s.mp4 和 multi_audio.ts（scripts/make_samples.sh �
   T   触控板：WHEEL_LEFT/RIGHT 快退快进 5 秒，WHEEL_UP/DOWN 音量；菜单打开时滚轮不动进度；
       菜单“窗口大小”循环；Alt+0/1/2 设置 current-window-scale（mpv 默认绑定）
   T2  settings 里 trackpad=false 时不覆盖滚轮，WHEEL_RIGHT 仍是 mpv 默认的 10 秒
+  N   不带视频启动：提示“把视频拖进窗口”一直显示；打开打不开的文件，错误提示 10 秒后消失，mpv 不退出
+  K   mpv 进程被杀掉（相当于窗口被关）：主循环正常结束并保存播放位置
 """
 
 from __future__ import annotations
@@ -97,10 +100,10 @@ def translated_count(app: App) -> int:
     return sum(1 for c in tr.store.snapshot() if c.translation) if tr else 0
 
 
-def make_args(video: Path, extra: list[str]):
+def make_args(video, extra: list[str]):
     parser = build_parser()
     return parser.parse_args([
-        str(video), "--backend", "fake", "--model", "base",
+        *([str(video)] if video else []), "--backend", "fake", "--model", "base",
         "--mpv-opt", "vo=x11", "--mpv-opt", "ao=null",
         *extra,
     ])
@@ -177,17 +180,28 @@ def main() -> None:
 
     def phase_a(app: App):
         check("A: 转写线程启动", wait_for(lambda: app.transcriber is not None, 20))
+        check("A: 加载模型期间状态行提示正在加载识别模型",
+              wait_for(lambda: any("正在加载识别模型" in ln for ln in status(app)), 10), status(app))
+        check("A: 状态行显示翻译服务未连接",
+              wait_for(lambda: any("翻译服务未连接" in ln for ln in status(app)), 15), status(app))
+        t_seen = time.time()
+        check("A: 菜单底部的翻译状态始终有", "翻译服务未连接" in (app._translate_status_line() or ""))
+        gone = wait_for(lambda: not any("翻译服务未连接" in ln for ln in status(app)), 15)
+        shown = time.time() - t_seen
+        check("A: 提示会在约 10 秒后消失", gone and 8.5 <= shown <= 12, round(shown, 2))
+        check("A: 提示消失后菜单底部仍显示", "翻译服务未连接" in (app._translate_status_line() or ""))
+        check("A: 加载完成后不再提示加载", not any("正在加载识别模型" in ln for ln in status(app)))
         check("A: 播放前进", wait_for(lambda: pos(app) > 3, 30), round(pos(app), 2))
         p1 = pos(app)
         time.sleep(2)
         check("A: 没有翻译服务时视频照常播放", pos(app) > p1 + 1.5, [round(p1, 2), round(pos(app), 2)])
         check("A: 原文字幕出现", wait_for(lambda: app.transcriber.store.snapshot(), 20))
-        check("A: 状态行显示翻译服务未连接",
-              wait_for(lambda: any("翻译服务未连接" in ln for ln in status(app)), 15), status(app))
         check("A: 没有字幕不可用的提示", not any("字幕不可用" in ln for ln in status(app)))
         shot(app, "1_no_translate.png")
 
+    os.environ["VIDAC_FAKE_LOAD_DELAY"] = "2"   # 模拟第一次加载模型要几秒
     run_phase("A", video_a, ["--translate-url", dead_url], phase_a)
+    os.environ.pop("VIDAC_FAKE_LOAD_DELAY", None)
 
     video_m = fresh_copy(ja, "mlx.mp4")
 
@@ -263,6 +277,7 @@ def main() -> None:
         key(app, "RIGHT", 0.5)
         check("B: 菜单修改字号并保存", read_settings().get("font_scale") == 1.1, read_settings().get("font_scale"))
         check("B: 菜单画面已绘制", wait_for(lambda: app.last_menu is not None, 5))
+        check("B: 菜单底部显示翻译状态", "翻译 中文 · qwen2.5:7b" in (app.last_menu or ""), app.last_menu)
         time.sleep(0.5)
         shot(app, "3_menu.png")
         key(app, "ESC", 0.5)
@@ -408,6 +423,12 @@ def main() -> None:
               dict(app._menu_rows()).get("窗口大小"))
         key(app, "ESC", 0.5)
 
+        # 菜单里的倍速要跟 mpv 的 speed 属性一致（用户用 [ ] 改速也对）
+        key(app, "]", 0.4)
+        check("T: ] 加速后菜单倍速显示 1.1x", dict(app._menu_rows()).get("倍速") == "1.1x",
+              dict(app._menu_rows()).get("倍速"))
+        app.player.speed = 1.0
+
         # mpv 默认的 Alt+0/1/2 也应该生效
         for combo, want in [("Alt+2", 2.0), ("Alt+1", 1.0), ("Alt+0", 0.5)]:
             key(app, combo, 0.6)
@@ -436,6 +457,40 @@ def main() -> None:
     run_phase("T2", video_t, ["--no-translate"], phase_t2)
     settings_file.write_text(json.dumps({**saved, "trackpad": True}, ensure_ascii=False), encoding="utf-8")
 
+    # ---------- N：不带视频启动 ----------
+    def phase_n(app: App):
+        hint = "把视频拖进窗口，或按 o 打开"
+        check("N: 没有视频时显示拖入提示", wait_for(lambda: hint in status(app), 5), status(app))
+        app.player.loadfile("http://127.0.0.1:9/x.mp4")   # 不是本地文件，也打不开
+        check("N: 打开不是本地的文件，状态行显示错误",
+              wait_for(lambda: any("不是本地文件" in ln for ln in status(app)), 10), status(app))
+        t0 = time.time()
+        check("N: 错误提示约 10 秒后消失",
+              wait_for(lambda: not any("不是本地文件" in ln for ln in status(app)), 15)
+              and 8.0 <= time.time() - t0 <= 12.5, round(time.time() - t0, 2))
+        check("N: 打不开的文件没有让 mpv 退出", not app.player.core_shutdown)
+        check("N: 错误提示消失后拖入提示仍显示", hint in status(app), status(app))
+        time.sleep(11)
+        check("N: 拖入提示不会自动隐藏", hint in status(app), status(app))
+
+    run_phase("N", None, ["--no-translate"], phase_n)
+
+    # ---------- K：mpv 进程被关掉 ----------
+    video_k = fresh_copy(ja, "k.mp4")
+
+    def phase_k(app: App):
+        check("K: 播放就绪", wait_for(lambda: pos(app) > 1 and app.file_ready, 20))
+        app.player.time_pos = 25
+        check("K: 跳到 25 秒", wait_for(lambda: 24 <= pos(app) <= 30, 10), round(pos(app), 2))
+        time.sleep(1.2)
+        app.player.proc.kill()
+
+    t_k = time.time()
+    app_k = run_phase("K", video_k, ["--no-translate"], phase_k)
+    saved_k = app_k.positions.get(video_k)
+    check("K: mpv 被杀掉后主循环结束并保存位置", saved_k is not None and 20 <= saved_k <= 40, saved_k)
+    check("K: 主循环很快结束", time.time() - t_k < 40, round(time.time() - t_k, 1))
+
     # ---------- G：默认引擎 Apple Intelligence（用假的小工具冒充 Swift 组件） ----------
     helper = TESTS / "fake_apple_helper.py"
     apple_log = OUT / "apple_calls.jsonl"
@@ -447,10 +502,11 @@ def main() -> None:
     video_g0 = fresh_copy(ja, "g0.mp4")
 
     def phase_g0(app: App):
-        check("G0: 播放前进", wait_for(lambda: pos(app) > 3, 30), round(pos(app), 2))
         check("G0: 状态行说明 Apple Intelligence 没开启，只显示原文",
               wait_for(lambda: any("没有开启" in ln and "只显示原文" in ln for ln in status(app)), 20),
               status(app))
+        check("G0: 菜单底部也是这句", "没有开启" in (app._translate_status_line() or ""))
+        check("G0: 播放前进", wait_for(lambda: pos(app) > 3, 30), round(pos(app), 2))
         check("G0: 原文字幕照常出现", wait_for(lambda: app.transcriber.store.snapshot(), 20))
         p1 = pos(app)
         time.sleep(2)

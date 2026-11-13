@@ -90,6 +90,7 @@ class Transcriber(threading.Thread):
         self.complete = False
         self.error: Optional[str] = None
         self.warning: Optional[str] = None
+        self.model_loading = False      # 从创建识别后端开始，到第一段转写完成为止（第一次运行要下载模型）
         self.processed: list[int] = []  # 实际处理过的段号，按顺序（调试和测试用）
         self.pos = 0.0                  # 播放位置，由主线程更新
         self.loaded = threading.Event() # 缓存已读入 store 之后置位，翻译线程等它
@@ -126,6 +127,7 @@ class Transcriber(threading.Thread):
             log.exception("转写线程出错")
             self.error = f"{type(exc).__name__}: {exc}"
         finally:
+            self.model_loading = False
             self.loaded.set()
 
     def _run(self) -> None:
@@ -140,7 +142,8 @@ class Transcriber(threading.Thread):
             log.info("字幕缓存已完整：%s", self.srt_path)
             return
 
-        backend = self.backend_factory()
+        self.model_loading = True
+        backend = self.backend_factory()   # 出错时由 run() 的 finally 清掉 model_loading
         log.info("开始转写：%s 音轨 %d，共 %d 段", self.video.name, self.track + 1, self.total)
         fails = 0
         last_exc: Optional[Exception] = None
@@ -149,7 +152,10 @@ class Transcriber(threading.Thread):
             if idx is None:
                 break
             try:
-                ok = self._process(idx, backend)
+                try:
+                    ok = self._process(idx, backend)
+                finally:
+                    self.model_loading = False
                 fails = 0
             except Exception as exc:
                 log.exception("第 %d 段转写失败，跳过", idx)

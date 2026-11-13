@@ -774,6 +774,36 @@ class TranscriberIntegrationTests(unittest.TestCase):
             if p.suffix != ".mp4":
                 p.unlink()
 
+    def test_model_loading_flag_covers_backend_creation_until_first_chunk(self):
+        seen = {}
+
+        def slow_factory():
+            seen["during_create"] = tr.model_loading
+            return FakeBackend()
+
+        tr = Transcriber(self.video, 0, slow_factory, model="fake", chunk_seconds=30.0, rebuild=True)
+        self.assertFalse(tr.model_loading)
+        orig = tr._process
+
+        def spy(idx, backend):
+            seen.setdefault("first_chunk_start", tr.model_loading)
+            return orig(idx, backend)
+
+        tr._process = spy
+        tr.run()
+        self.assertTrue(seen["during_create"])
+        self.assertTrue(seen["first_chunk_start"])
+        self.assertFalse(tr.model_loading)
+
+    def test_model_loading_flag_cleared_when_backend_fails(self):
+        def broken():
+            raise RuntimeError("下载失败")
+
+        tr = Transcriber(self.video, 0, broken, model="fake", chunk_seconds=30.0, rebuild=True)
+        tr.run()
+        self.assertIn("下载失败", tr.error)
+        self.assertFalse(tr.model_loading)
+
     def test_full_run_then_cache_reuse(self):
         before = FakeBackend.calls
         tr = Transcriber(self.video, 0, FakeBackend, model="fake", chunk_seconds=30.0,
@@ -872,6 +902,144 @@ class MultiTrackTests(unittest.TestCase):
         tr = Transcriber(SAMPLES / "multi_audio.ts", 1, lambda: None, model="base",
                          cache_dir=Path(tempfile.mkdtemp()))
         self.assertEqual(tr.base.split("-", 1)[1], "multi_audio.a2")
+
+
+class ResolveModelTests(unittest.TestCase):
+    def test_presets_have_candidate_lists(self):
+        from vidac.asr import MODEL_PRESETS, resolve_model
+        for name, preset in MODEL_PRESETS.items():
+            self.assertIsInstance(preset["mlx"], list, name)
+            self.assertGreaterEqual(len(preset["mlx"]), 2, name)
+        self.assertEqual(resolve_model("base")["mlx"][0], "mlx-community/whisper-base-mlx")
+        self.assertIn("mlx-community/whisper-base", resolve_model("base")["mlx"])
+        self.assertEqual(resolve_model("tiny")["mlx"][0], "mlx-community/whisper-tiny")
+
+    def test_repo_name_is_single_candidate(self):
+        from vidac.asr import resolve_model
+        self.assertEqual(resolve_model("someone/whisper-x")["mlx"], ["someone/whisper-x"])
+
+    def test_second_candidate_used_when_first_is_404(self):
+        from vidac.asr import resolve_mlx_repo
+        calls = []
+
+        def download(repo, **kw):
+            calls.append((repo, bool(kw.get("local_files_only"))))
+            if kw.get("local_files_only") or repo == "a/one":
+                raise RuntimeError("404 not found")
+            return f"/cache/{repo}"
+
+        self.assertEqual(resolve_mlx_repo(["a/one", "a/two"], download), "/cache/a/two")
+        self.assertEqual(calls, [("a/one", True), ("a/two", True), ("a/one", False), ("a/two", False)])
+
+    def test_local_copy_wins_without_network(self):
+        from vidac.asr import resolve_mlx_repo
+        calls = []
+
+        def download(repo, **kw):
+            calls.append((repo, bool(kw.get("local_files_only"))))
+            if repo == "a/two" and kw.get("local_files_only"):
+                return "/cache/a/two"
+            raise AssertionError("不应该联网")
+
+        self.assertEqual(resolve_mlx_repo(["a/one", "a/two"], download), "/cache/a/two")
+        self.assertTrue(all(local for _, local in calls))
+
+    def test_all_fail_error_lists_every_name_and_hint(self):
+        from vidac.asr import resolve_mlx_repo
+
+        def download(repo, **kw):
+            raise RuntimeError("404 " + repo)
+
+        with self.assertRaises(RuntimeError) as cm:
+            resolve_mlx_repo(["a/one", "a/two"], download)
+        msg = str(cm.exception)
+        self.assertIn("a/one", msg)
+        self.assertIn("a/two", msg)
+        self.assertIn("--model", msg)
+
+    def test_incomplete_local_dir_is_not_used(self):
+        from vidac.asr import resolve_mlx_repo
+        with tempfile.TemporaryDirectory() as d:
+            partial = Path(d) / "partial"
+            partial.mkdir()
+            (partial / "config.json").write_text("{}")   # 没有权重，中断的下载
+            full = Path(d) / "full"
+            full.mkdir()
+            (full / "config.json").write_text("{}")
+            (full / "weights.npz").write_bytes(b"x")
+
+            def download(repo, **kw):
+                if kw.get("local_files_only"):
+                    return str(partial)
+                return str(full)
+
+            self.assertEqual(resolve_mlx_repo(["a/one"], download), str(full))
+
+    def test_local_directory_given_as_model(self):
+        from vidac.asr import resolve_mlx_repo
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(resolve_mlx_repo([d], lambda *a, **k: 1 / 0), d)
+
+
+class StatusHintTests(unittest.TestCase):
+    """提示类状态行 10 秒后隐藏的计时逻辑（不需要 mpv）。"""
+
+    def _app(self):
+        import threading
+        from vidac.player import App
+        app = App.__new__(App)
+        app._hints = {}
+        app._hints_lock = threading.Lock()
+        return app
+
+    def test_hint_hides_after_ten_seconds_and_restarts_when_text_changes(self):
+        app = self._app()
+        seen: set = set()
+        self.assertTrue(app._hint("k", "文字", 100.0, seen))
+        self.assertTrue(app._hint("k", "文字", 109.9, seen))
+        self.assertFalse(app._hint("k", "文字", 110.1, seen))
+        self.assertTrue(app._hint("k", "新的文字", 111.0, seen))
+
+    def test_set_error_restarts_timer(self):
+        app = self._app()
+        app._set_error("只有一条音轨")
+        seen: set = set()
+        self.assertTrue(app._hint("error_msg", app.error_msg, 0.0, seen))
+        self.assertFalse(app._hint("error_msg", app.error_msg, 11.0, seen))
+        app._set_error("只有一条音轨")
+        self.assertTrue(app._hint("error_msg", app.error_msg, 12.0, seen))
+
+
+class MpvIpcTests(unittest.TestCase):
+    def test_option_formatting(self):
+        from vidac.mpvipc import _opt
+        self.assertEqual(_opt("keep_open", "yes"), "--keep-open=yes")
+        self.assertEqual(_opt("osc", True), "--osc=yes")
+        self.assertEqual(_opt("osc", False), "--osc=no")
+
+    def test_missing_mpv_gives_clear_error(self):
+        from unittest import mock
+        from vidac import mpvipc
+        with mock.patch.dict(os.environ, {}, clear=False), \
+                mock.patch.object(mpvipc.shutil, "which", return_value=None), \
+                mock.patch.object(mpvipc, "MPV_CANDIDATES", ()):
+            os.environ.pop("VIDAC_MPV", None)
+            with self.assertRaises(mpvipc.MpvError) as cm:
+                mpvipc.find_mpv()
+        self.assertIn("install.sh", str(cm.exception))
+
+    def test_cli_prints_hint_and_exits_1_without_mpv(self):
+        from unittest import mock
+        from vidac import cli, mpvipc
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.dict(os.environ, {"VIDAC_HOME": d, "VIDAC_SOCKET": os.path.join(d, "s.sock")}), \
+                mock.patch.object(mpvipc, "find_mpv", side_effect=mpvipc.MpvError("找不到 mpv，请先运行 ./install.sh")), \
+                mock.patch("sys.stderr") as err:
+            with self.assertRaises(SystemExit) as cm:
+                cli.main(["--no-translate"])
+        self.assertEqual(cm.exception.code, 1)
+        printed = "".join(c.args[0] for c in err.write.call_args_list if c.args)
+        self.assertIn("install.sh", printed)
 
 
 if __name__ == "__main__":

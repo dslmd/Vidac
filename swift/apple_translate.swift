@@ -45,6 +45,8 @@ struct AppleTranslate {
             break
         case .unavailable(let reason):
             fail(describe(reason), code: 2)
+        @unknown default:
+            fail("Apple Intelligence 不可用", code: 2)
         }
         if CommandLine.arguments.contains("--check") {
             print("ok")

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import sys
 from pathlib import Path
 
@@ -83,14 +82,13 @@ def main(argv: list[str] | None = None) -> None:
     elif args.list_tracks:
         parser.error("--list-tracks 需要指定视频文件")
 
-    if os.path.exists(ipc.socket_path()):
-        # 没有人应答的 socket 是上次异常退出留下的，删掉，免得 mpv 无法创建
-        try:
-            os.unlink(ipc.socket_path())
-        except OSError:
-            pass
+    from .mpvipc import MpvError
+    from .player import App
 
-    from .player import App  # 放在最后再导入，libmpv 缺失时前面的参数检查仍能工作
-
-    App(args).run()
+    try:
+        app = App(args)
+    except MpvError as exc:
+        print(f"无法启动 mpv：{exc}", file=sys.stderr)
+        sys.exit(1)
+    app.run()
     sys.exit(0)

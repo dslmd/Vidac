@@ -1,7 +1,7 @@
 """测试用后端：不识别语音，每 2 秒给一条日语占位字幕，末尾括号里是绝对时间。
 
 用来验证分段、调度、缓存、翻译、播放器叠加这些流程，不代表识别质量。
-VIDAC_FAKE_DELAY=1.5 可以模拟每段耗时 1.5 秒。
+VIDAC_FAKE_DELAY=1.5 可以模拟每段耗时 1.5 秒，VIDAC_FAKE_LOAD_DELAY=2 可以模拟加载模型耗时 2 秒。
 """
 
 from __future__ import annotations
@@ -36,6 +36,9 @@ class FakeBackend(Backend):
 
     def __init__(self) -> None:
         self.delay = float(os.environ.get("VIDAC_FAKE_DELAY", "0") or 0)
+        load = float(os.environ.get("VIDAC_FAKE_LOAD_DELAY", "0") or 0)
+        if load:
+            time.sleep(load)
 
     def transcribe(self, audio: np.ndarray, language: Optional[str], task: str = "transcribe",
                    *, offset: float = 0.0) -> tuple[list[Segment], Optional[str]]:

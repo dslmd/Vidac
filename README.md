@@ -4,7 +4,7 @@
 
 - 播放器优先：没有字幕、模型没下载、转写失败、翻译服务没开，视频都照常播放。
 - 完全离线：识别用本机的 Whisper，翻译默认用 macOS 自带的 Apple Intelligence。也可以改用本机的 Ollama 或 LM Studio。不调用任何云端 API。
-- 播放：mpv（通过 python-mpv 控制）。识别：mlx-whisper（Apple Silicon），装不上时用 faster-whisper（CPU）。
+- 播放：mpv 程序（Python 启动它，通过 IPC 控制）。识别：mlx-whisper（Apple Silicon），装不上时用 faster-whisper（CPU）。
   解码：ffmpeg。支持 mp4、mkv、mov、ts 等，多音轨可选。
 
 ## 功能
@@ -28,7 +28,7 @@ cd Vidac
 ./install.sh
 ```
 
-脚本会做这些事：`brew install ffmpeg mpv`，创建 `.venv` 虚拟环境并安装 `requirements.txt`，预下载默认转写模型 `base`，然后用 `swiftc` 编译翻译组件 `bin/apple-translate`。编译需要 Xcode 命令行工具，没有的话先运行 `xcode-select --install`。编译失败时播放照常，只是没有译文。
+脚本会做这些事：`brew install ffmpeg mpv`，创建 `.venv` 虚拟环境并安装 `requirements.txt`，预下载默认转写模型 `base`（仓库名有备用候选，本地已有的优先，再依次联网尝试），然后用 `swiftc` 编译翻译组件 `bin/apple-translate`。编译需要 Xcode 命令行工具，没有的话先运行 `xcode-select --install`。编译失败时播放照常，只是没有译文，swiftc 的报错会存到 `bin/build.log`。
 
 可选环境变量：
 
@@ -171,6 +171,8 @@ Whisper => 耳语模型
 - 菜单打开时，滚轮不会快进快退或改音量，免得调菜单时视频跳走。
 - 设置文件里的 `trackpad` 控制左右滑和上下滑，默认 `true`。写成 `false` 时不覆盖 mpv 的滚轮绑定：左右滑恢复 mpv 默认的 10 秒，上下滑仍是 mpv 默认的音量。这个设置只能改设置文件，改完重新打开播放器生效。
 
+mpv 是原生应用，捏合缩放如果 mpv 的 macOS 版自带，就直接能用，这一点没有验证。
+
 **捏合没有实现，也没有查清楚。** 我查不到 mpv 在 macOS 上会不会把捏合原生变成窗口缩放。GitHub 访问不了，apt 也没有 mpv 的源码源。本机 mpv 0.37 的 Linux 版里没有捏合相关的键名（`mpv --input-keylist` 里没有 PINCH、MAGNIFY 之类）。要做的话需要原生代码，在 `NSView` 的 `magnifyWithEvent:` 里改窗口大小，这个项目里没有写。如果在 Mac 上试出 mpv 原生支持捏合，就不需要改代码。
 
 **没有在真实触控板上测试。** 测试是在 Linux 上用 `keypress` 模拟 `WHEEL_LEFT` 等键。没有验证 Mac 上的触控板是不是真的发出这些键，也没有验证一次滑动发出几个事件、快进的步长和手感。这些都要在 Mac 上试。
@@ -225,13 +227,16 @@ Whisper 在静音和片尾容易编造文字，这里做三件事：
 - 生成的 App 是 AppleScript droplet，启动时执行本项目的 `run.sh`。所以本项目的目录要保持不动。移动或重命名项目后，要重新运行 `build_app.sh`。
 - 翻译组件 `bin/apple-translate` 也在项目目录里，App 调用的就是它，所以要先运行 `./install.sh` 编译。
 - 日志写在 `~/Library/Logs/vidac.log`，出问题先看这里。
-- Dock 里显示的是 Python 图标，这是 droplet 方案的限制。想换图标要自己改 App 包里的 `.icns`。
+- 窗口是 mpv 自己开的，Dock 里显示的是 mpv 图标，不是 App 包里的图标。没有处理这一点，也没有在 Mac 上看过实际效果。
 - 从 Finder 启动时 PATH 很短，`run.sh` 已经把 `/opt/homebrew/bin` 和 `/usr/local/bin` 加进去，所以能找到 brew 装的 ffmpeg。
 
 **这部分没有在 Mac 上验证过。** 我在 Linux 上只做了 `bash -n` 语法检查和代码审阅。`build_app.sh`、`install.sh`（包括 `swiftc` 编译、`brew install ollama` 和 `WITH_OLLAMA` 分支），都需要你在 Mac 上运行一次确认。
 
 ## 设计选择
 
+- 播放器是单独启动的 mpv 程序，Python 通过 JSON IPC（`vidac/mpvipc.py`）控制，不用 libmpv。macOS 的窗口事件循环必须在主线程，Python 里用 libmpv 开窗口容易不出窗口；mpv 自己是原生应用，没有这个问题。代价是多一个进程，按键和属性变化都走 socket。
+- 第一次运行要下载识别模型。进度行会先显示“正在加载识别模型（第一次需要下载，请稍等）”。模型仓库名没有全部核实过，所以每个预设有备用名，先找本地已有的，再依次联网尝试，都失败时报出试过的名字。
+- 状态行里完成类和提示类的内容（转写完成、翻译服务未连接、错误提示等）显示 10 秒后自动隐藏，进行中的进度一直显示，换视频重新计时。Tab 菜单底部始终显示翻译状态。没有视频时一直显示“把视频拖进窗口，或按 o 打开”。
 - 字幕不用 mpv 的原生字幕轨，而是用 `osd-overlay` 画在视频上。原生字幕轨要整个文件重新加载才能刷新，边转写边更新做不好。
 - 设置菜单是 mpv 的叠加层，不是独立窗口。内嵌 mpv 到 Qt 或 Tk 窗口在 macOS 上不稳定。叠加层纯键盘操作，也能在 Linux 下完整测试。
 - 翻译有两个引擎，共用同一套批量、校验、术语表和缓存逻辑。`openai` 引擎用标准库 `urllib` 调用 OpenAI 兼容接口，没有新增第三方依赖，Ollama 和 LM Studio 都支持。`apple` 引擎通过小的 Swift 工具 `bin/apple-translate` 调用系统模型，用标准输入输出交换 JSON。
@@ -244,9 +249,10 @@ Whisper 在静音和片尾容易编造文字，这里做三件事：
 
 在 Linux 沙箱里（Xvfb、mpv 0.37、ffmpeg）验证过的：
 
-- 单元测试：`python -m unittest discover -s tests`，84 项通过。覆盖字幕读写、缓存命名和查找、用户字幕、清理重复和语气词（并检查幂等）、黑名单、设置优先级、术语表、翻译输出解析、翻译重试和对半拆分、批次选择、位置记录、显示模式、单实例通信、Apple 引擎的调用协议、触控板设置的默认值。
-- 端到端：`tests/e2e_xvfb.py`，真的打开 mpv 窗口，用假识别后端、`tests/mock_llm.py` 假翻译服务，以及 `tests/fake_apple_helper.py`（冒充 Swift 工具）。共 90 项检查，全部通过。检查了：
-  - 没有翻译服务时视频照常播放，状态行显示“翻译服务未连接”
+- 单元测试：`python -m unittest discover -s tests`，98 项通过。覆盖字幕读写、缓存命名和查找、用户字幕、清理重复和语气词（并检查幂等）、黑名单、设置优先级、术语表、翻译输出解析、翻译重试和对半拆分、批次选择、位置记录、显示模式、单实例通信、Apple 引擎的调用协议、触控板设置的默认值。
+- 端到端：`tests/e2e_xvfb.py`，真的打开 mpv 窗口，用假识别后端、`tests/mock_llm.py` 假翻译服务，以及 `tests/fake_apple_helper.py`（冒充 Swift 工具）。共 110 项检查，全部通过。检查了：
+  - 没有翻译服务时视频照常播放，状态行显示“翻译服务未连接”，约 10 秒后消失，菜单底部仍显示；加载模型期间显示“正在加载识别模型”
+  - 不带视频启动时一直显示拖入提示；打开打不开的文件，错误提示约 10 秒后消失，mpv 不退出
   - mlx 不可用时视频照常播放，状态行显示“字幕不可用”
   - 译文逐步出现，批大小不超过 25，后续批带前文，术语表生效
   - 拖动到 150 秒后，该段被优先转写
@@ -298,9 +304,9 @@ DISPLAY=:99 python tests/e2e_xvfb.py samples out
 
 ```
 install.sh                  一键安装（brew + venv + pip + 预下载模型 + 编译翻译组件，可选 Ollama）
-run.sh                      启动脚本，设置 PATH 和 libmpv 路径后运行 python -m vidac
+run.sh                      启动脚本，设置 PATH 后运行 python -m vidac
 build_app.sh                生成 Vidac.app（只能在 Mac 上运行）
-requirements.txt            默认依赖（mlx-whisper、python-mpv、numpy）
+requirements.txt            默认依赖（mlx-whisper、numpy；mpv 程序由 brew 安装）
 requirements-fallback.txt   faster-whisper，mlx 不可用时安装
 vidac/
   cli.py                    命令行参数，单实例检查
@@ -310,6 +316,7 @@ vidac/
   filters.py                幻觉过滤、重复和语气词合并、人声检测
   settings.py               设置文件和优先级
   positions.py              记住播放位置
+  mpvipc.py                 启动 mpv 并通过 JSON IPC 控制（属性、按键、事件）
   ipc.py                    单实例：把文件交给已在运行的窗口
   srt.py                    .srt 读写、缓存文件命名、清理
   media.py                  ffprobe / ffmpeg 封装
