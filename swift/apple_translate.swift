@@ -1,5 +1,5 @@
 // apple-translate：调用 macOS 26 自带的 Apple Intelligence 本机模型（Foundation Models）。
-// 完全离线，不需要 Ollama。由 subplayer/translate.py 的 AppleClient 调用。
+// 完全离线，不需要 Ollama。由 vidac/translate.py 的 AppleClient 调用。
 //
 // 用法：
 //   apple-translate --check        模型可用时输出 ok 并返回 0；不可用时原因写到 stderr，返回 2

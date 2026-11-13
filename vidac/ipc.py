@@ -8,8 +8,8 @@ import socket
 
 
 def socket_path() -> str:
-    """socket 路径要短：macOS 限制 104 字符。SUBPLAYER_SOCKET 可覆盖，测试用。"""
-    return os.environ.get("SUBPLAYER_SOCKET") or f"/tmp/subplayer-{os.getuid()}.sock"
+    """socket 路径要短：macOS 限制 104 字符。VIDAC_SOCKET 可覆盖，测试用。"""
+    return os.environ.get("VIDAC_SOCKET") or f"/tmp/vidac-{os.getuid()}.sock"
 
 
 def send_loadfile(path: str, sock: str | None = None, timeout: float = 1.0) -> bool:

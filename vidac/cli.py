@@ -1,4 +1,4 @@
-"""命令行入口：python -m subplayer <视频> [选项]"""
+"""命令行入口：python -m vidac <视频> [选项]"""
 
 from __future__ import annotations
 
@@ -14,14 +14,14 @@ from .asr import BACKENDS, MODEL_PRESETS
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="subplayer",
+        prog="vidac",
         description="本地视频播放器：边播边用 Whisper 生成字幕，并用本地大模型翻译（完全离线）。",
     )
     p.add_argument("video", nargs="?",
                    help="视频文件（mp4 / mkv / mov / ts 等）。不填则启动后拖入文件或按 o 打开")
     p.add_argument("--model", default=None,
                    help=f"转写模型：{' / '.join(MODEL_PRESETS)}，或直接写 mlx 仓库名"
-                        "（默认 base，也可用环境变量 SUBPLAYER_MODEL 或 settings.json）")
+                        "（默认 base，也可用环境变量 VIDAC_MODEL 或 settings.json）")
     p.add_argument("--backend", choices=BACKENDS, default="auto",
                    help="识别后端。auto：有 mlx-whisper 用 mlx，否则 faster-whisper。"
                         "fake 只产生占位字幕，用于测试流程")

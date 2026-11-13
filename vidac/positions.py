@@ -10,7 +10,7 @@ from typing import Optional
 
 from .srt import atomic_write
 
-log = logging.getLogger("subplayer.positions")
+log = logging.getLogger("vidac.positions")
 
 MAX_ENTRIES = 500
 NEAR_END_SECONDS = 15.0   # 距结尾这么近就视为看完，不再记住

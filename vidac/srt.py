@@ -1,7 +1,7 @@
 """字幕文件（.srt）读写，缓存文件命名，进度文件。
 
 缓存文件命名（base 是视频名，第 2 条及以后音轨为 movie.a2 这种形式）：
-  <base>.subplayer.json   进度：模型、语言、已完成段号、当前原文字幕文件名
+  <base>.vidac.json   进度：模型、语言、已完成段号、当前原文字幕文件名
   <base>.<语言码>.srt     原文字幕，语言未知时用 und
   <base>.<目标语言>.srt   译文字幕
 """
@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-CACHE_DIR = Path.home() / "Library" / "Caches" / "subplayer"
+CACHE_DIR = Path.home() / "Library" / "Caches" / "vidac"
 
 
 @dataclass
@@ -111,7 +111,7 @@ def translation_srt_path(folder: Path, base: str, target: str) -> Path:
 
 
 def progress_path(folder: Path, base: str) -> Path:
-    return folder / f"{base}.subplayer.json"
+    return folder / f"{base}.vidac.json"
 
 
 def load_progress(path: Path) -> Optional[dict]:

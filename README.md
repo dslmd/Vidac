@@ -1,4 +1,4 @@
-# subplayer
+# vidac
 
 本地视频播放器。打开视频后立即播放，字幕在后台边播边生成，生成的字幕再交给本地大模型翻译。
 
@@ -24,7 +24,7 @@
 需要 macOS（Apple Silicon）和 [Homebrew](https://brew.sh)。
 
 ```bash
-cd subplayer
+cd Vidac
 ./install.sh
 ```
 
@@ -92,17 +92,17 @@ ollama pull qwen2.5:7b
 
 | 项目 | 命令行 | 环境变量 | 设置文件键名 | 菜单 |
 | --- | --- | --- | --- | --- |
-| 翻译引擎 | `--translate-engine` | `SUBPLAYER_TRANSLATE_ENGINE` | `translate_engine`（`apple` 或 `openai`） | 翻译引擎行，在两者之间切换 |
-| 翻译服务地址 | `--translate-url` | `SUBPLAYER_TRANSLATE_URL` | `translate_url` | 不能改，只能用前三种 |
-| 翻译模型 | `--translate-model` | `SUBPLAYER_TRANSLATE_MODEL` | `translate_model` | 翻译模型行，从服务列出的模型里选（只在 `openai` 引擎下有效） |
-| 目标语言 | `--target-lang` | `SUBPLAYER_TARGET_LANG` | `target_lang` | 目标语言行 |
+| 翻译引擎 | `--translate-engine` | `VIDAC_TRANSLATE_ENGINE` | `translate_engine`（`apple` 或 `openai`） | 翻译引擎行，在两者之间切换 |
+| 翻译服务地址 | `--translate-url` | `VIDAC_TRANSLATE_URL` | `translate_url` | 不能改，只能用前三种 |
+| 翻译模型 | `--translate-model` | `VIDAC_TRANSLATE_MODEL` | `translate_model` | 翻译模型行，从服务列出的模型里选（只在 `openai` 引擎下有效） |
+| 目标语言 | `--target-lang` | `VIDAC_TARGET_LANG` | `target_lang` | 目标语言行 |
 | 关闭翻译 | `--no-translate` | | `translate`（true/false） | 翻译行 |
 
 只给了 `--translate-url` 或 `--translate-model`、没有给引擎时，自动当作 `openai`。
 
 菜单里切换引擎后，已有的译文不会重新翻译，因为译文文件名（如 `movie.zh.srt`）不含引擎名。想用新引擎重翻，启动时加 `--retranslate`。
 
-设置文件位置：macOS 上是 `~/Library/Application Support/subplayer/settings.json`，其他系统是 `~/.local/share/subplayer/settings.json`。可以用环境变量 `SUBPLAYER_HOME` 改掉这个目录。
+设置文件位置：macOS 上是 `~/Library/Application Support/vidac/settings.json`，其他系统是 `~/.local/share/vidac/settings.json`。可以用环境变量 `VIDAC_HOME` 改掉这个目录。
 
 例子：用 LM Studio 代替 Ollama（在 LM Studio 里启动本地服务器，默认端口 1234）：
 
@@ -181,7 +181,7 @@ Whisper => 耳语模型
 
 | 文件 | 内容 |
 | --- | --- |
-| `movie.subplayer.json` | 进度：转写用的模型、语言、已完成的段、当前原文字幕文件名 |
+| `movie.vidac.json` | 进度：转写用的模型、语言、已完成的段、当前原文字幕文件名 |
 | `movie.ja.srt` | 原文字幕，语言是检测到或指定的语言码 |
 | `movie.und.srt` | 原文字幕，语言还没检测到时使用。检测到语言后写入 `movie.<语言>.srt`，并删除它 |
 | `movie.zh.srt` | 译文字幕，目标语言码为 `zh` |
@@ -193,21 +193,21 @@ Whisper => 耳语模型
 - 只有 `movie.srt`（或 `movie.<语言>.srt`），没有进度文件时，当作完整字幕直接使用，不转写。这是你自己准备的字幕。
 - 缓存是用某个模型生成的，现在换了模型：会显示提示，但仍然用旧缓存。想统一请加 `--rebuild`，它会删掉原文、进度和译文，从头转写和翻译。
 - 只想重新翻译：`--retranslate`，只删译文。
-- 视频所在目录不可写（比如只读的外接盘）时，字幕放到 `~/Library/Caches/subplayer/`。
+- 视频所在目录不可写（比如只读的外接盘）时，字幕放到 `~/Library/Caches/vidac/`。
 
 ## 记住位置和单实例
 
 - 播放中每 5 秒记一次位置，退出时再记一次。记录在 `设置目录/positions.json`，最多保留 500 个视频。
 - 打开时如果位置在开头 5 秒之后、结尾 15 秒之前，就跳到上次的位置。快看完的视频会删除记录。
 - 文件大小或修改时间变了，不恢复位置。
-- 单实例靠 mpv 的 IPC socket 实现。socket 路径默认是 `/tmp/subplayer-<uid>.sock`，可用环境变量 `SUBPLAYER_SOCKET` 改。新进程发现已有窗口，就把文件交给它，自己立即退出。
+- 单实例靠 mpv 的 IPC socket 实现。socket 路径默认是 `/tmp/vidac-<uid>.sock`，可用环境变量 `VIDAC_SOCKET` 改。新进程发现已有窗口，就把文件交给它，自己立即退出。
 
 ## 转写质量处理
 
 Whisper 在静音和片尾容易编造文字，这里做三件事：
 
 1. 连续重复：同一句话（去掉标点后相同）连续出现超过 3 次，只保留第一条。
-2. 黑名单：常见的片尾套话（如“ご視聴ありがとうございました”）直接丢弃，列表在 `subplayer/filters.py`。
+2. 黑名单：常见的片尾套话（如“ご視聴ありがとうございました”）直接丢弃，列表在 `vidac/filters.py`。
 3. 语气词：“あ”“えっと”“嗯”“um”这类语气词，或 `(息)`、`[音楽]` 这样的括号噪音，如果相邻间隔不超过 3 秒就合并成一条。语气词不送去翻译。
 
 另外还保留了 Whisper 自带的静音判定（no_speech_prob 和 avg_logprob）和压缩比判定。
@@ -218,13 +218,13 @@ Whisper 在静音和片尾容易编造文字，这里做三件事：
 
 ```bash
 ./install.sh            # 先装好依赖
-./build_app.sh          # 生成 build/Subplayer.app
+./build_app.sh          # 生成 build/Vidac.app
 ./build_app.sh --install  # 再复制到 /Applications
 ```
 
 - 生成的 App 是 AppleScript droplet，启动时执行本项目的 `run.sh`。所以本项目的目录要保持不动。移动或重命名项目后，要重新运行 `build_app.sh`。
 - 翻译组件 `bin/apple-translate` 也在项目目录里，App 调用的就是它，所以要先运行 `./install.sh` 编译。
-- 日志写在 `~/Library/Logs/subplayer.log`，出问题先看这里。
+- 日志写在 `~/Library/Logs/vidac.log`，出问题先看这里。
 - Dock 里显示的是 Python 图标，这是 droplet 方案的限制。想换图标要自己改 App 包里的 `.icns`。
 - 从 Finder 启动时 PATH 很短，`run.sh` 已经把 `/opt/homebrew/bin` 和 `/usr/local/bin` 加进去，所以能找到 brew 装的 ffmpeg。
 
@@ -278,7 +278,7 @@ Whisper 在静音和片尾容易编造文字，这里做三件事：
 scripts/make_samples.sh samples
 
 # 单元测试（不需要 mpv 窗口）
-SUBPLAYER_SAMPLES=samples python -m unittest discover -s tests -v
+VIDAC_SAMPLES=samples python -m unittest discover -s tests -v
 
 # 端到端（Linux，需要 Xvfb 和 mpv；输出截图和结果到 out/）
 Xvfb :99 -screen 0 1280x800x24 &
@@ -298,11 +298,11 @@ DISPLAY=:99 python tests/e2e_xvfb.py samples out
 
 ```
 install.sh                  一键安装（brew + venv + pip + 预下载模型 + 编译翻译组件，可选 Ollama）
-run.sh                      启动脚本，设置 PATH 和 libmpv 路径后运行 python -m subplayer
-build_app.sh                生成 Subplayer.app（只能在 Mac 上运行）
+run.sh                      启动脚本，设置 PATH 和 libmpv 路径后运行 python -m vidac
+build_app.sh                生成 Vidac.app（只能在 Mac 上运行）
 requirements.txt            默认依赖（mlx-whisper、python-mpv、numpy）
 requirements-fallback.txt   faster-whisper，mlx 不可用时安装
-subplayer/
+vidac/
   cli.py                    命令行参数，单实例检查
   player.py                 mpv 窗口、按键、字幕和菜单叠加层
   transcriber.py            分段、调度、缓存、后台转写线程

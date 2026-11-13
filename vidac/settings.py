@@ -14,7 +14,7 @@ from typing import Any, Optional
 
 from .srt import atomic_write
 
-log = logging.getLogger("subplayer.settings")
+log = logging.getLogger("vidac.settings")
 
 DEFAULTS: dict[str, Any] = {
     "model": "base",
@@ -30,24 +30,24 @@ DEFAULTS: dict[str, Any] = {
 }
 
 ENV_NAMES = {
-    "model": "SUBPLAYER_MODEL",
-    "language": "SUBPLAYER_LANG",
-    "translate_engine": "SUBPLAYER_TRANSLATE_ENGINE",
-    "translate_url": "SUBPLAYER_TRANSLATE_URL",
-    "translate_model": "SUBPLAYER_TRANSLATE_MODEL",
-    "target_lang": "SUBPLAYER_TARGET_LANG",
+    "model": "VIDAC_MODEL",
+    "language": "VIDAC_LANG",
+    "translate_engine": "VIDAC_TRANSLATE_ENGINE",
+    "translate_url": "VIDAC_TRANSLATE_URL",
+    "translate_model": "VIDAC_TRANSLATE_MODEL",
+    "target_lang": "VIDAC_TARGET_LANG",
 }
 
 
 def app_dir() -> Path:
-    """设置、位置记录等文件所在目录。SUBPLAYER_HOME 优先。"""
-    env = os.environ.get("SUBPLAYER_HOME")
+    """设置、位置记录等文件所在目录。VIDAC_HOME 优先。"""
+    env = os.environ.get("VIDAC_HOME")
     if env:
         path = Path(env).expanduser()
     elif sys.platform == "darwin":
-        path = Path.home() / "Library" / "Application Support" / "subplayer"
+        path = Path.home() / "Library" / "Application Support" / "vidac"
     else:
-        path = Path.home() / ".local" / "share" / "subplayer"
+        path = Path.home() / ".local" / "share" / "vidac"
     path.mkdir(parents=True, exist_ok=True)
     return path
 

@@ -31,7 +31,7 @@ from .srt import Cue, translation_srt_path
 from .translate import Glossary, Translator, lang_name_zh, make_client
 from .transcriber import Transcriber
 
-log = logging.getLogger("subplayer.player")
+log = logging.getLogger("vidac.player")
 
 W, H = 1280, 720          # 叠加层坐标系，mpv 会按视频实际尺寸缩放
 SUB_ID, STATUS_ID, MENU_ID = 1, 2, 3
@@ -111,7 +111,7 @@ def _player_options(args) -> dict:
         "force_window": "yes",
         "keep_open": "yes",
         "ytdl": "no",
-        "title": "subplayer",
+        "title": "vidac",
         "aid": str(args.audio_track),
         "input_ipc_server": ipc.socket_path(),
     }

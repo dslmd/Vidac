@@ -1,7 +1,7 @@
 """端到端测试（Linux + Xvfb，真的打开 mpv 窗口播放）。
 
-用假识别后端（占位日语字幕）加 mock_llm.py（假翻译服务）跑完整流程。每个阶段用 SUBPLAYER_HOME
-和 SUBPLAYER_SOCKET 指向测试目录，视频先复制到 OUTDIR/work，缓存文件只写在那里。
+用假识别后端（占位日语字幕）加 mock_llm.py（假翻译服务）跑完整流程。每个阶段用 VIDAC_HOME
+和 VIDAC_SOCKET 指向测试目录，视频先复制到 OUTDIR/work，缓存文件只写在那里。
 
 用法（先 Xvfb :99 &，并 export DISPLAY=:99）：
     python tests/e2e_xvfb.py SAMPLES_DIR OUTDIR
@@ -37,7 +37,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(TESTS))
-os.environ["SUBPLAYER_FAKE_DELAY"] = "1.5"  # 每段假装要 1.5 秒，才能看出分段进度
+os.environ["VIDAC_FAKE_DELAY"] = "1.5"  # 每段假装要 1.5 秒，才能看出分段进度
 
 OUT = Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else None
 SAMPLES = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else None
@@ -45,18 +45,18 @@ WORK = OUT / "work" if OUT else None
 HOME = OUT / "home" if OUT else None
 SOCK = OUT / "s.sock" if OUT else None
 if OUT is not None:
-    os.environ["SUBPLAYER_HOME"] = str(HOME)
-    os.environ["SUBPLAYER_SOCKET"] = str(SOCK)
-for k in ["SUBPLAYER_MODEL", "SUBPLAYER_LANG", "SUBPLAYER_TRANSLATE_URL",
-          "SUBPLAYER_TRANSLATE_MODEL", "SUBPLAYER_TARGET_LANG"]:
+    os.environ["VIDAC_HOME"] = str(HOME)
+    os.environ["VIDAC_SOCKET"] = str(SOCK)
+for k in ["VIDAC_MODEL", "VIDAC_LANG", "VIDAC_TRANSLATE_URL",
+          "VIDAC_TRANSLATE_MODEL", "VIDAC_TARGET_LANG"]:
     os.environ.pop(k, None)
 
 from mock_llm import MockLLM  # noqa: E402
-from subplayer import srt  # noqa: E402
-from subplayer.asr.fake_backend import FakeBackend  # noqa: E402
-from subplayer.cli import build_parser  # noqa: E402
-from subplayer.player import MENU_ROWS, App  # noqa: E402
-from subplayer.settings import app_dir  # noqa: E402
+from vidac import srt  # noqa: E402
+from vidac.asr.fake_backend import FakeBackend  # noqa: E402
+from vidac.cli import build_parser  # noqa: E402
+from vidac.player import MENU_ROWS, App  # noqa: E402
+from vidac.settings import app_dir  # noqa: E402
 
 RESULTS: dict = {}
 FAILS: list[str] = []
@@ -325,7 +325,7 @@ def main() -> None:
         t0 = time.time()
         env = dict(os.environ)
         env["PYTHONPATH"] = str(ROOT)
-        proc = subprocess.run([sys.executable, "-m", "subplayer", str(other)],
+        proc = subprocess.run([sys.executable, "-m", "vidac", str(other)],
                               cwd=str(ROOT), env=env, capture_output=True, text=True, timeout=30)
         elapsed = time.time() - t0
         check("E: 第二个进程退出码为 0", proc.returncode == 0, proc.returncode)
@@ -439,7 +439,7 @@ def main() -> None:
     # ---------- G：默认引擎 Apple Intelligence（用假的小工具冒充 Swift 组件） ----------
     helper = TESTS / "fake_apple_helper.py"
     apple_log = OUT / "apple_calls.jsonl"
-    os.environ["SUBPLAYER_APPLE_HELPER"] = str(helper)
+    os.environ["VIDAC_APPLE_HELPER"] = str(helper)
     os.environ["FAKE_APPLE_LOG"] = str(apple_log)
     before_mock = len(mock.requests)
 

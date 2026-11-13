@@ -1,6 +1,6 @@
 """模型预设和后端选择。
 
-换模型：--model small（或 SUBPLAYER_MODEL=small）。
+换模型：--model small（或 VIDAC_MODEL=small）。
 想用别的 mlx 仓库：--model 直接写 HuggingFace 仓库名，例如 mlx-community/whisper-medium-mlx。
 """
 

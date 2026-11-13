@@ -14,7 +14,7 @@ from .asr.base import Backend
 from .filters import clean_cues, is_voiced, keep_segment
 from .srt import Cue
 
-log = logging.getLogger("subplayer.transcriber")
+log = logging.getLogger("vidac.transcriber")
 
 CHUNK_SECONDS = 30.0
 PAD_SECONDS = 2.0       # 每段前后多取 2 秒给模型当上下文；只保留段中心落在本段内的句子

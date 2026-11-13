@@ -1,6 +1,6 @@
 """单元测试。不需要 mpv 窗口和 mlx，只需要 numpy 和 ffmpeg（部分用例需要）。
 
-运行：SUBPLAYER_SAMPLES=<素材目录> python -m unittest discover -s tests -v
+运行：VIDAC_SAMPLES=<素材目录> python -m unittest discover -s tests -v
 """
 
 from __future__ import annotations
@@ -23,18 +23,18 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from subplayer import ipc, media, srt  # noqa: E402
-from subplayer.asr.base import Segment  # noqa: E402
-from subplayer.asr.fake_backend import FakeBackend  # noqa: E402
-from subplayer.filters import (  # noqa: E402
+from vidac import ipc, media, srt  # noqa: E402
+from vidac.asr.base import Segment  # noqa: E402
+from vidac.asr.fake_backend import FakeBackend  # noqa: E402
+from vidac.filters import (  # noqa: E402
     clean_cues, is_filler, is_hallucination_phrase, keep_segment, normalize, voiced_fraction,
 )
-from subplayer.positions import PositionStore  # noqa: E402
-from subplayer.player import cue_lines, subtitle_ass  # noqa: E402
-from subplayer.settings import DEFAULTS, Settings  # noqa: E402
-from subplayer.srt import Cue  # noqa: E402
-from subplayer.transcriber import SubtitleStore, Transcriber  # noqa: E402
-from subplayer.translate import (  # noqa: E402
+from vidac.positions import PositionStore  # noqa: E402
+from vidac.player import cue_lines, subtitle_ass  # noqa: E402
+from vidac.settings import DEFAULTS, Settings  # noqa: E402
+from vidac.srt import Cue  # noqa: E402
+from vidac.transcriber import SubtitleStore, Transcriber  # noqa: E402
+from vidac.translate import (  # noqa: E402
     BATCH_SIZE, Glossary, LineTranslator, TranslateClient, TranslateError, Translator,
     model_present, parse_numbered, same_language,
 )
@@ -79,7 +79,7 @@ class CacheNamingTests(unittest.TestCase):
         self.assertEqual(srt.original_srt_path(folder, base, "ja").name, "movie.a2.ja.srt")
         self.assertEqual(srt.original_srt_path(folder, base, None).name, "movie.a2.und.srt")
         self.assertEqual(srt.translation_srt_path(folder, base, "zh").name, "movie.a2.zh.srt")
-        self.assertEqual(srt.progress_path(folder, base).name, "movie.a2.subplayer.json")
+        self.assertEqual(srt.progress_path(folder, base).name, "movie.a2.vidac.json")
 
     def test_unwritable_folder_falls_back_to_cache_dir(self):
         cache = self.dir / "cache"
@@ -108,7 +108,7 @@ class CacheNamingTests(unittest.TestCase):
         self.assertEqual([c.text for c in tr.store.snapshot()], ["日本語"])
 
     def test_progress_file_points_to_srt_name(self):
-        srt.save_progress(self.dir / "movie.subplayer.json", {
+        srt.save_progress(self.dir / "movie.vidac.json", {
             "model": "base", "language": "ja", "srt": "movie.ja.srt", "done": [0], "total": 2})
         (self.dir / "movie.ja.srt").write_text(
             "1\n00:00:00,000 --> 00:00:01,000\nこんにちは\n", encoding="utf-8")
@@ -215,8 +215,8 @@ class SettingsTests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.path = Path(self._tmp.name) / "settings.json"
         self._env = {k: os.environ.pop(k, None) for k in
-                     ["SUBPLAYER_MODEL", "SUBPLAYER_LANG", "SUBPLAYER_TRANSLATE_URL",
-                      "SUBPLAYER_TRANSLATE_MODEL", "SUBPLAYER_TARGET_LANG"]}
+                     ["VIDAC_MODEL", "VIDAC_LANG", "VIDAC_TRANSLATE_URL",
+                      "VIDAC_TRANSLATE_MODEL", "VIDAC_TARGET_LANG"]}
 
     def tearDown(self):
         for k, v in self._env.items():
@@ -258,7 +258,7 @@ class SettingsTests(unittest.TestCase):
 
     def test_priority_cli_over_env_over_file(self):
         self.path.write_text(json.dumps({"model": "small", "target_lang": "ja"}), encoding="utf-8")
-        os.environ["SUBPLAYER_MODEL"] = "medium"
+        os.environ["VIDAC_MODEL"] = "medium"
         s = Settings.from_args(self.args(), path=self.path)
         self.assertEqual(s.get("model"), "medium")          # 环境变量 > 文件
         self.assertEqual(s.get("target_lang"), "ja")        # 文件 > 默认
@@ -266,7 +266,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(s.get("model"), "large-v3")        # 命令行 > 环境变量
 
     def test_menu_set_saves_and_drops_override(self):
-        os.environ["SUBPLAYER_TARGET_LANG"] = "en"
+        os.environ["VIDAC_TARGET_LANG"] = "en"
         s = Settings.from_args(self.args(), path=self.path)
         self.assertEqual(s.get("target_lang"), "en")
         s.set("target_lang", "zh-tw")
@@ -433,7 +433,7 @@ class LineTranslatorTests(unittest.TestCase):
         self.assertNotIn("s3 => t3", user)
 
     def test_think_block_and_fence_removed(self):
-        from subplayer.translate import clean_output
+        from vidac.translate import clean_output
         self.assertEqual(clean_output("<think>想想</think>\n```\n1: 好\n```"), "1: 好")
 
 
@@ -579,7 +579,7 @@ class PositionTests(unittest.TestCase):
         self.assertIsNone(self.store.get(self.video))
 
     def test_max_entries(self):
-        import subplayer.positions as P
+        import vidac.positions as P
         old = P.MAX_ENTRIES
         P.MAX_ENTRIES = 3
         try:
@@ -639,12 +639,12 @@ class AppleClientTests(unittest.TestCase):
             os.environ["FAKE_APPLE_MODE"] = self._old
 
     def client(self, mode="ok"):
-        from subplayer.translate import AppleClient
+        from vidac.translate import AppleClient
         os.environ["FAKE_APPLE_MODE"] = mode
         return AppleClient(self.HELPER)
 
     def test_check_and_translate(self):
-        from subplayer.translate import Glossary, LineTranslator
+        from vidac.translate import Glossary, LineTranslator
         c = self.client()
         self.assertEqual(c.list_models(), ["apple"])
         lt = LineTranslator(c, "ja", "zh", Glossary())
@@ -652,25 +652,25 @@ class AppleClientTests(unittest.TestCase):
                          ["中文こんにちは", "中文ありがとう"])
 
     def test_unavailable_reports_reason(self):
-        from subplayer.translate import TranslateError
+        from vidac.translate import TranslateError
         with self.assertRaises(TranslateError) as cm:
             self.client("disabled").list_models()
         self.assertIn("没有开启", str(cm.exception))
 
     def test_missing_helper_is_a_translate_error(self):
-        from subplayer.translate import AppleClient, TranslateError
+        from vidac.translate import AppleClient, TranslateError
         with self.assertRaises(TranslateError) as cm:
             AppleClient(Path("/nonexistent/apple-translate")).list_models()
         self.assertIn("install.sh", str(cm.exception))
 
     def test_refused_batch_is_split_until_it_passes(self):
-        from subplayer.translate import Glossary, LineTranslator
+        from vidac.translate import Glossary, LineTranslator
         lt = LineTranslator(self.client("refuse_big"), "ja", "zh", Glossary())
         lines = [f"行{i}" for i in range(7)]
         self.assertEqual(lt.translate_lines(lines), [f"中文行{i}" for i in range(7)])
 
     def test_make_client_picks_engine(self):
-        from subplayer.translate import AppleClient, TranslateClient, make_client
+        from vidac.translate import AppleClient, TranslateClient, make_client
         self.assertIsInstance(make_client("apple", "http://x/v1", "m"), AppleClient)
         self.assertIsInstance(make_client("openai", "http://x/v1", "m"), TranslateClient)
 
@@ -846,7 +846,7 @@ class TranscriberIntegrationTests(unittest.TestCase):
             os.environ["PATH"] = old
 
 
-SAMPLES = Path(os.environ.get("SUBPLAYER_SAMPLES", ROOT / "samples"))
+SAMPLES = Path(os.environ.get("VIDAC_SAMPLES", ROOT / "samples"))
 
 
 @unittest.skipUnless(

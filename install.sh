@@ -51,7 +51,7 @@ if [ -z "${SKIP_PREFETCH:-}" ]; then
 import sys
 from huggingface_hub import snapshot_download
 sys.path.insert(0, ".")
-from subplayer.asr import resolve_model
+from vidac.asr import resolve_model
 repo = resolve_model(sys.argv[1])["mlx"]
 path = snapshot_download(repo)
 print("已缓存到", path)

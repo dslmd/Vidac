@@ -23,7 +23,7 @@ from . import srt
 from .filters import is_filler
 from .srt import Cue
 
-log = logging.getLogger("subplayer.translate")
+log = logging.getLogger("vidac.translate")
 
 BATCH_SIZE = 25          # 每批最多多少行，测试可改
 CONTEXT_SIZE = 5         # 前文最多几条已译字幕
@@ -118,8 +118,8 @@ class TranslateClient:
 # ---- Apple Intelligence 本机模型 ----
 
 def apple_helper_path() -> Path:
-    """Swift 小工具的位置。SUBPLAYER_APPLE_HELPER 优先，否则是项目里的 bin/apple-translate。"""
-    env = os.environ.get("SUBPLAYER_APPLE_HELPER")
+    """Swift 小工具的位置。VIDAC_APPLE_HELPER 优先，否则是项目里的 bin/apple-translate。"""
+    env = os.environ.get("VIDAC_APPLE_HELPER")
     if env:
         return Path(env)
     return Path(__file__).resolve().parents[1] / "bin" / "apple-translate"

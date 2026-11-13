@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 生成 Subplayer.app：一个 AppleScript droplet，启动时调用本项目的 run.sh。
-# 用法：./build_app.sh             生成 build/Subplayer.app
+# 生成 Vidac.app：一个 AppleScript droplet，启动时调用本项目的 run.sh。
+# 用法：./build_app.sh             生成 build/Vidac.app
 #       ./build_app.sh --install  生成后复制到 /Applications
 #
 # 注意：App 里记录的是本项目目录的绝对路径，项目目录移动或重命名后要重新运行本脚本。
@@ -24,8 +24,8 @@ if [ ! -x .venv/bin/python ]; then
   exit 1
 fi
 
-APP="$PROJECT/build/Subplayer.app"
-SCRIPT="$PROJECT/build/Subplayer.applescript"
+APP="$PROJECT/build/Vidac.app"
+SCRIPT="$PROJECT/build/Vidac.applescript"
 mkdir -p "$PROJECT/build"
 
 # 项目路径写进 AppleScript 字符串，先转义反斜杠和双引号
@@ -40,7 +40,7 @@ on launchWith(filePath)
 	if filePath is not "" then
 		set cmd to cmd & " " & quoted form of filePath
 	end if
-	set cmd to cmd & " >> \\"\$HOME/Library/Logs/subplayer.log\\" 2>&1 &"
+	set cmd to cmd & " >> \\"\$HOME/Library/Logs/vidac.log\\" 2>&1 &"
 	do shell script cmd
 end launchWith
 
@@ -62,9 +62,9 @@ set_plist() {  # set_plist <键> <类型> <值>：有就改，没有就加
   /usr/libexec/PlistBuddy -c "Set :$1 $3" "$PLIST" 2>/dev/null \
     || /usr/libexec/PlistBuddy -c "Add :$1 $2 $3" "$PLIST"
 }
-set_plist CFBundleName string Subplayer
-set_plist CFBundleIdentifier string local.subplayer
-set_plist CFBundleDisplayName string Subplayer
+set_plist CFBundleName string Vidac
+set_plist CFBundleIdentifier string local.vidac
+set_plist CFBundleDisplayName string Vidac
 # 让 Finder 把视频文件关联到这个 App（双击打开方式）
 /usr/libexec/PlistBuddy -c "Delete :CFBundleDocumentTypes" "$PLIST" 2>/dev/null || true
 /usr/libexec/PlistBuddy \
@@ -78,10 +78,10 @@ set_plist CFBundleDisplayName string Subplayer
   "$PLIST"
 
 echo "已生成：$APP"
-echo "日志：\$HOME/Library/Logs/subplayer.log"
+echo "日志：\$HOME/Library/Logs/vidac.log"
 
 if [ "${1:-}" = "--install" ]; then
-  rm -rf "/Applications/Subplayer.app"
-  cp -R "$APP" "/Applications/Subplayer.app"
-  echo "已复制到 /Applications/Subplayer.app"
+  rm -rf "/Applications/Vidac.app"
+  cp -R "$APP" "/Applications/Vidac.app"
+  echo "已复制到 /Applications/Vidac.app"
 fi
