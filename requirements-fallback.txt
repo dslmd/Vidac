@@ -1,0 +1,3 @@
+# 可选：mlx-whisper 装不上时用 faster-whisper（CPU，较慢）。
+# 装完后 --backend faster 或 auto 会自动使用它。
+faster-whisper>=1.2.1
