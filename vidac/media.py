@@ -48,7 +48,8 @@ def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
     try:
         return subprocess.run(cmd, **kwargs)
     except FileNotFoundError as exc:
-        raise MediaError(f"找不到 {cmd[0]}，请先运行 install.sh 或 brew install ffmpeg") from exc
+        raise MediaError(f"Vidac cannot find {cmd[0]}, which it needs to read the audio. Reinstall "
+                         "Vidac, or run install.sh when running from source.") from exc
 
 
 def _ffprobe(args: list[str]) -> str:
@@ -58,7 +59,9 @@ def _ffprobe(args: list[str]) -> str:
         text=True,
     )
     if proc.returncode != 0:
-        raise MediaError(proc.stderr.strip() or "ffprobe 失败")
+        detail = " ".join(proc.stderr.split())[-300:]   # 压成一行：错误文字会直接显示和放进 JSON
+        raise MediaError("Vidac could not read this file, so subtitles are unavailable for it"
+                         + (f" ({detail})." if detail else "."))
     return proc.stdout
 
 
@@ -100,7 +103,8 @@ def probe_duration(path: Path) -> float:
         except ValueError:
             continue
     if not values or max(values) <= 0:
-        raise MediaError("读不到视频时长，文件可能损坏")
+        raise MediaError("Vidac could not read the length of this video, so subtitles are "
+                         "unavailable. The file may be damaged.")
     return max(values)
 
 
@@ -119,6 +123,6 @@ def read_audio(path: Path, track: int, start: float, duration: float) -> np.ndar
     ]
     proc = _run(cmd, capture_output=True)
     if proc.returncode != 0:
-        msg = proc.stderr.decode(errors="replace").strip()[-300:]
-        raise MediaError(f"解码音频失败（音轨 {track + 1}）：{msg}")
+        msg = " ".join(proc.stderr.decode(errors="replace").split())[-300:]
+        raise MediaError(f"Vidac could not decode audio track {track + 1} of this video ({msg}).")
     return np.frombuffer(proc.stdout, dtype=np.float32).copy()

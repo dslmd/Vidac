@@ -12,14 +12,15 @@ from .base import Backend, Segment
 class MlxBackend(Backend):
     name = "mlx-whisper"
 
-    def __init__(self, repos: "list[str] | str") -> None:
+    def __init__(self, repos: "list[str] | str", progress=None) -> None:
         import mlx_whisper  # 导入失败就尽早报错
 
         from . import resolve_mlx_repo
 
         self._mlx = mlx_whisper
         # 第一次运行会在这里下载模型；解析出本地路径后，之后每段都直接用它，不再访问网络
-        self.repo = resolve_mlx_repo([repos] if isinstance(repos, str) else list(repos))
+        self.repo = resolve_mlx_repo([repos] if isinstance(repos, str) else list(repos),
+                                     progress=progress)
 
     def transcribe(self, audio: np.ndarray, language: Optional[str], task: str = "transcribe",
                    *, offset: float = 0.0) -> tuple[list[Segment], Optional[str]]:

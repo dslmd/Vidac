@@ -33,7 +33,7 @@ is built from these fields. All `message` / `reason` strings are English.
 
 | Field | Meaning |
 | --- | --- |
-| `phase` | `idle` (no file), `disabled` (automatic subtitles turned off), `model-download`, `model-load`, `transcribing`, `ready` (whole file transcribed), `error` |
+| `phase` | `idle` (no file open; also published after the video is closed, with everything about the old file cleared), `disabled` (automatic subtitles turned off), `model-download`, `model-load`, `transcribing`, `ready` (whole file transcribed), `error` |
 | `progress` | Fraction 0–1 of the file transcribed, or `null` when unknown |
 | `ahead` | `true` while the playhead is in a region that has not been transcribed yet |
 | `download` | During `model-download`: `{"received": bytes, "total": bytes or null}`; otherwise `null` |
@@ -42,9 +42,9 @@ is built from these fields. All `message` / `reason` strings are English.
 | `resumed_from` | Seconds, set once when playback was resumed from a saved position, else `null` |
 | `delay` | Subtitle timing offset in seconds (positive = later) |
 | `translation.state` | `off`, `working`, `ready`, `unavailable` (engine cannot be used), `error` |
-| `translation.reason` | English sentence explaining `unavailable` / `error`, with what the user can do |
+| `translation.reason` | English sentence, or `null`. It always explains `unavailable` and `error`, but it may also be present for `off` (the speech is already in the target language; or generation is off or stopped and only part of the translation exists) and for `ready` (some lines could not be translated), and for `working` (the translation server is slow). Apps should show it whenever it is present, as secondary text in the non-error states |
 | `error` | `null` or `{"code": "offline" \| "model-download" \| "audio" \| "internal", "message": "<English sentence>"}` |
-| `files` | Subtitle files written for this video (absolute paths) |
+| `files` | Subtitle files written for this video (absolute paths). Vidac's own names always contain `.vidac.`: `<name>.vidac.<language>.srt` for the original, `<name>.vidac.tr.<target>.srt` for the translation. `<name>` is the video name without extension, or with it (`movie.mkv.vidac.…`) when another video with the same name but a different extension sits in the same folder |
 | `settings` | The companion's effective settings, so the app's controls reflect reality |
 
 The legacy free-text `user-data/vidac-status` is still published for the

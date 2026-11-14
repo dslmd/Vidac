@@ -1,6 +1,6 @@
 # Releasing
 
-Target platform: Apple Silicon, macOS 26.2 or later. The version number is written only in `VERSION` at the repository root, and release notes go in `CHANGELOG.md` under a `## <version>` heading.
+Target platform: Apple Silicon, macOS 26.0 or later (the `LSMinimumSystemVersion` written by `scripts/make_info_plist.py`). The version number is written only in `VERSION` at the repository root, and release notes go in `CHANGELOG.md` under a `## <version>` heading. `scripts/release.sh` copies that whole section (both the English and 中文 subsections) into the GitHub release notes, so write both before releasing.
 
 The public download is a disk image. Users open it, drag Vidac onto the `Applications` link, and open it from there. Speech-recognition models are not in the download: the default `base` model is fetched from Hugging Face the first time subtitles are generated, and Vidac works offline afterwards.
 

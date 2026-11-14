@@ -10,14 +10,19 @@ enum VideoFormats {
     static var extensions: [String] {
         documentTypes.flatMap { $0["CFBundleTypeExtensions"] as? [String] ?? [] }
     }
+    /// The formats most people mean; "Common Formats" in Make Default Video Player.
+    static let commonExtensions = ["mp4", "m4v", "mov", "mkv", "avi", "webm", "ts", "m2ts", "wmv", "flv"]
     /// Every content type a listed extension can resolve to on this Mac,
     /// including identifiers declared by other installed players. Types that
     /// are not audio-visual (for example PostScript for .ps) are left alone.
-    static var contentTypes: [UTType] {
-        var identifiers = Set(documentTypes.flatMap { $0["LSItemContentTypes"] as? [String] ?? [] })
+    static var contentTypes: [UTType] { contentTypes(forExtensions: nil) }
+    /// The same for just the given extensions (all registered ones when nil).
+    static func contentTypes(forExtensions only: [String]?) -> [UTType] {
+        var identifiers = Set<String>()
+        if only == nil { identifiers = Set(documentTypes.flatMap { $0["LSItemContentTypes"] as? [String] ?? [] }) }
         identifiers.subtract(["public.movie", "public.video"])  // abstract parents cannot be assigned
         var types = identifiers.compactMap { UTType($0) }
-        for name in extensions {
+        for name in only ?? extensions {
             for type in UTType.types(tag: name, tagClass: .filenameExtension, conformingTo: nil)
             where type.conforms(to: .audiovisualContent) || type.isDynamic {
                 if identifiers.insert(type.identifier).inserted { types.append(type) }
@@ -25,10 +30,10 @@ enum VideoFormats {
         }
         return types.sorted { $0.identifier < $1.identifier }
     }
-    /// Asks Launch Services to open every registered format with this copy.
-    static func makeDefaultHandler(completion: @escaping (_ changed: Int, _ failed: [String]) -> Void) {
+    /// Asks Launch Services to open the registered formats (or just the given extensions) with this copy.
+    static func makeDefaultHandler(extensions only: [String]? = nil, completion: @escaping (_ changed: Int, _ failed: [String]) -> Void) {
         let application = Bundle.main.bundleURL
-        let types = contentTypes
+        let types = contentTypes(forExtensions: only)
         let group = DispatchGroup()
         let lock = NSLock()
         var failed: [String] = []

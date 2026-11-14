@@ -2,7 +2,9 @@
 // 完全离线，不需要 Ollama。由 vidac/translate.py 的 AppleClient 调用。
 //
 // 用法：
-//   apple-translate --check        模型可用时输出 ok 并返回 0；不可用时原因写到 stderr，返回 2
+//   apple-translate --check        模型可用时输出 ok 并返回 0；不可用时原因写到 stderr，返回 2。
+//                                  原因的格式是 "[代码] 英文句子"，代码是 not-enabled / model-not-ready /
+//                                  not-eligible / unavailable 之一，vidac/translate.py 按代码给出处理办法
 //   apple-translate                从 stdin 读 JSON {"instructions": "...", "prompt": "..."}，
 //                                  译文写到 stdout
 // 返回码：0 成功；2 模型不可用；3 这次生成被拒绝或超出上下文（调用方会把这批拆小重试）；
@@ -26,13 +28,13 @@ func fail(_ message: String, code: Int32) -> Never {
 func describe(_ reason: SystemLanguageModel.Availability.UnavailableReason) -> String {
     switch reason {
     case .deviceNotEligible:
-        return "This Mac does not support Apple Intelligence"
+        return "[not-eligible] This Mac does not support Apple Intelligence"
     case .appleIntelligenceNotEnabled:
-        return "Apple Intelligence is turned off (enable it in System Settings)"
+        return "[not-enabled] Apple Intelligence is turned off (enable it in System Settings)"
     case .modelNotReady:
-        return "The Apple Intelligence model has not finished downloading"
+        return "[model-not-ready] The Apple Intelligence model has not finished downloading"
     @unknown default:
-        return "Apple Intelligence is unavailable"
+        return "[unavailable] Apple Intelligence is unavailable"
     }
 }
 
@@ -46,7 +48,7 @@ struct AppleTranslate {
         case .unavailable(let reason):
             fail(describe(reason), code: 2)
         @unknown default:
-            fail("Apple Intelligence is unavailable", code: 2)
+            fail("[unavailable] Apple Intelligence is unavailable", code: 2)
         }
         if CommandLine.arguments.contains("--check") {
             print("ok")

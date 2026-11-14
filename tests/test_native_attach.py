@@ -15,6 +15,7 @@ from unittest import mock
 
 from vidac import mpvipc
 from vidac.player import App
+from vidac.settings import Settings
 
 
 class ProtocolHost:
@@ -188,7 +189,7 @@ class NativeAttachTests(unittest.TestCase):
         app._skip_initial_resume = True
         app.file_ready = False
         app.video = Path("/already-playing.mp4")
-        app.player = mock.Mock(duration=500)
+        app.player = mock.Mock(duration=500, time_pos=30.0)
         app.positions = mock.Mock()
         app.positions.get.return_value = 40.0
         app._on_file_loaded()
@@ -203,45 +204,41 @@ class NativeAttachTests(unittest.TestCase):
         app.positions.get.assert_called_once_with(Path("/next-file.mp4"))
         app.player.seek.assert_called_once_with(40.0, reference="absolute")
 
+    def test_legacy_keep_flag_still_resumes_when_time_pos_unavailable(self):
+        app = App.__new__(App)
+        app._skip_initial_resume = True
+        app.file_ready = False
+        app.video = Path("/fresh.mp4")
+        app.player = mock.Mock(duration=500, time_pos=None)
+        app.positions = mock.Mock()
+        app.positions.get.return_value = 40.0
+        app._on_file_loaded()
+        app.player.seek.assert_called_once_with(40.0, reference="absolute")
+
     def test_native_settings_reject_bad_values_and_apply_background_change(self):
         app = App.__new__(App)
-        values = {"model": "base", "translate": True, "font_scale": 1.0}
-        app.settings = mock.Mock()
-        app.settings.get.side_effect = values.get
-        app.settings.set.side_effect = values.__setitem__
-        app._restart_workers = mock.Mock()
-        app._restart_translator = mock.Mock()
-        app.translator = mock.Mock()
-        app._native_setting("model", "small")
-        app._restart_workers.assert_called_once()
-        self.assertEqual(values["model"], "small")
-        app._native_setting("translate", "false")
-        self.assertFalse(app.translator.enabled)
-        app._native_setting("model", "not-a-model")
-        app._native_setting("font_scale", "nan")
-        app._native_setting("font_scale", "100")
-        self.assertEqual(values["font_scale"], 3.0)
-        self.assertEqual(app._restart_workers.call_count, 1)
-
-
-class TranslationStatusTests(unittest.TestCase):
-    def test_refused_lines_finish_attempts_and_remain_explicitly_untranslated(self):
-        app = App.__new__(App)
-        app.settings = mock.Mock()
-        app.settings.get.side_effect = {"translate": True, "translate_engine": "apple"}.get
-        app.translator = SimpleNamespace(status="ok", target="zh", translated=8,
-                                         total=10, _failed={1000, 2000})
-        app.transcriber = SimpleNamespace(complete=True, error=None)
-        self.assertFalse(app._translate_in_progress())
-        self.assertEqual(app._translate_status_line(), "翻译完成 · 8/10 · 2句保留原文")
-        # 仍有新的原文待产生时，不能提早把整个翻译流程称为完成。
-        app.transcriber.complete = False
-        self.assertTrue(app._translate_in_progress())
-        self.assertNotIn("翻译完成", app._translate_status_line())
-        # 旧的调用方/测试替身没有 _failed 时，沿用正常未完成计数。
-        del app.translator._failed
-        app.transcriber.complete = True
-        self.assertTrue(app._translate_in_progress())
+        with tempfile.TemporaryDirectory() as d:
+            app.settings = Settings(path=Path(d) / "settings.json")
+            app.video = Path("/video.mp4")
+            app.tracks = [object()]
+            app.transcriber = mock.Mock(source="generated")
+            app.translator = mock.Mock()
+            app.rebuild = app.retranslate = False
+            app.delay = 0.0
+            app._restart_workers = mock.Mock()
+            app._restart_translator = mock.Mock()
+            app._native_setting("model", "small")
+            app._restart_workers.assert_called_once()
+            self.assertEqual(app.settings.get("model"), "small")
+            self.assertTrue(app.rebuild and app.retranslate)   # 换模型 = 要求重做
+            app._native_setting("translate", "false")
+            self.assertFalse(app.translator.enabled)
+            app._native_setting("model", "not-a-model")
+            app._native_setting("font_scale", "nan")
+            app._native_setting("font_scale", "100")
+            self.assertEqual(app.settings.get("font_scale"), 3.0)
+            self.assertEqual(app.settings.get("model"), "small")
+            self.assertEqual(app._restart_workers.call_count, 1)
 
 
 if __name__ == "__main__":

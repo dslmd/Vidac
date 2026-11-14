@@ -77,3 +77,43 @@ class PositionStore:
         if str(video) in data:
             data.pop(str(video), None)
             self._write(data)
+
+
+class DelayStore:
+    """每个视频自己的字幕时间偏移（秒）。只记不为 0 的，保存在 app_dir()/delays.json。"""
+
+    def __init__(self, path: Path) -> None:
+        self.path = Path(path)
+
+    def _load(self) -> dict:
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def get(self, video: Path) -> Optional[float]:
+        rec = self._load().get(str(video))
+        try:
+            return float(rec["delay"])
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    def set(self, video: Path, delay: Optional[float]) -> None:
+        """delay 为 None 表示这个视频不再单独记（回到默认值）。"""
+        data = self._load()
+        key = str(video)
+        if delay is None:
+            if key not in data:
+                return
+            data.pop(key)
+        else:
+            data[key] = {"delay": round(float(delay), 3), "updated": time.time()}
+            if len(data) > MAX_ENTRIES:
+                keep = sorted(data.items(), key=lambda kv: kv[1].get("updated", 0)
+                              if isinstance(kv[1], dict) else 0, reverse=True)
+                data = dict(keep[:MAX_ENTRIES])
+        try:
+            atomic_write(self.path, json.dumps(data, ensure_ascii=False, indent=1))
+        except OSError as exc:
+            log.warning("字幕偏移保存失败：%s", exc)

@@ -76,9 +76,9 @@ class CacheNamingTests(unittest.TestCase):
     def test_file_names(self):
         folder, base = srt.cache_layout(self.video, 1)
         self.assertEqual(folder, self.dir)
-        self.assertEqual(srt.original_srt_path(folder, base, "ja").name, "movie.a2.ja.srt")
-        self.assertEqual(srt.original_srt_path(folder, base, None).name, "movie.a2.und.srt")
-        self.assertEqual(srt.translation_srt_path(folder, base, "zh").name, "movie.a2.zh.srt")
+        self.assertEqual(srt.original_srt_path(folder, base, "ja").name, "movie.a2.vidac.ja.srt")
+        self.assertEqual(srt.original_srt_path(folder, base, None).name, "movie.a2.vidac.und.srt")
+        self.assertEqual(srt.translation_srt_path(folder, base, "zh").name, "movie.a2.vidac.tr.zh.srt")
         self.assertEqual(srt.progress_path(folder, base).name, "movie.a2.vidac.json")
 
     def test_unwritable_folder_falls_back_to_cache_dir(self):
@@ -117,7 +117,8 @@ class CacheNamingTests(unittest.TestCase):
         tr._load_cache()
         self.assertEqual(tr._done, {0})
         self.assertEqual(tr.language, "ja")
-        self.assertEqual(tr.srt_path.name, "movie.ja.srt")
+        self.assertEqual(tr.srt_path.name, "movie.vidac.ja.srt")  # 新的写入用新名字
+        self.assertTrue(tr.legacy_cache)                          # 旧名字的缓存仍然读得到
 
     def test_clear_cache_removes_everything(self):
         folder, base = srt.cache_layout(self.video, 0)
@@ -239,7 +240,11 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(s.get_language(), None)
         self.assertEqual(set(DEFAULTS), {"model", "language", "translate", "target_lang",
                                          "translate_engine", "translate_url", "translate_model",
-                                         "display_mode", "font_scale", "trackpad"})
+                                         "display_mode", "font_scale", "trackpad", "enabled",
+                                         "delay", "subtitle_location"})
+        self.assertIs(s.get("enabled"), True)
+        self.assertEqual(s.get("delay"), 0.0)
+        self.assertEqual(s.get("subtitle_location"), "beside")
         self.assertEqual(s.get("translate_engine"), "apple")
         self.assertIs(s.get("trackpad"), True)
 
@@ -655,7 +660,8 @@ class AppleClientTests(unittest.TestCase):
         from vidac.translate import TranslateError
         with self.assertRaises(TranslateError) as cm:
             self.client("disabled").list_models()
-        self.assertIn("没有开启", str(cm.exception))
+        self.assertIn("turned off", str(cm.exception))
+        self.assertIn("System Settings", str(cm.exception))
 
     def test_missing_helper_is_a_translate_error(self):
         from vidac.translate import AppleClient, TranslateError
@@ -814,8 +820,8 @@ class TranscriberIntegrationTests(unittest.TestCase):
         self.assertEqual(tr.total, 3)
         self.assertEqual(tr.processed, [0, 1, 2])
         self.assertEqual(tr.language, "ja")  # 第一段有声，检测后锁定
-        self.assertEqual(tr.srt_path.name, "tone.ja.srt")
-        self.assertFalse((self.dir / "tone.und.srt").exists())  # 旧的 und 文件已删除
+        self.assertEqual(tr.srt_path.name, "tone.vidac.ja.srt")
+        self.assertFalse((self.dir / "tone.vidac.und.srt").exists())  # 旧的 und 文件已删除
         self.assertGreater(len(tr.store.snapshot()), 20)
         cues = srt.parse_srt(tr.srt_path.read_text(encoding="utf-8"))
         self.assertLessEqual(max(c.end for c in cues), 65.1)
@@ -850,7 +856,8 @@ class TranscriberIntegrationTests(unittest.TestCase):
         tr = Transcriber(self.video, 0, Broken, model="fake", chunk_seconds=30.0, rebuild=True)
         tr.run()
         self.assertIsNotNone(tr.error)
-        self.assertIn("连续 3 段转写失败", tr.error)
+        self.assertIn("3 parts in a row", tr.error)
+        self.assertEqual(tr.error_code, "internal")
         self.assertFalse(tr.complete)
         self.assertEqual(len(tr.processed), 3)
 

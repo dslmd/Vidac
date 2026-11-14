@@ -9,7 +9,7 @@ import numpy as np
 from .asr.base import Segment
 from .srt import Cue
 
-# Whisper 在静音、音乐段常见的编造台词（主要是日语 / 英语视频片尾套话）
+# Whisper 在静音、音乐段常见的编造台词（视频片尾套话）
 HALLUCINATION_PHRASES = (
     "ご視聴ありがとうございました",
     "ご視聴ありがとうございます",
@@ -24,6 +24,17 @@ HALLUCINATION_PHRASES = (
     "Thank you for watching",
     "Subtitles by",
     "Amara.org",
+    # 中文、韩语视频里同一类套话
+    "请不吝点赞",
+    "明镜与点点栏目",
+    "字幕由",
+    "字幕志愿者",
+    "字幕志願者",
+    "谢谢观看",
+    "感谢观看",
+    "시청해주셔서 감사합니다",
+    "시청해 주셔서 감사합니다",
+    "구독과 좋아요",
 )
 
 NO_SPEECH_PROB = 0.6      # 与 Whisper 默认 no_speech_threshold 一致
@@ -41,9 +52,32 @@ def normalize(text: str) -> str:
 _PHRASES_NORM = tuple(normalize(p) for p in HALLUCINATION_PHRASES)
 
 
-def is_hallucination_phrase(text: str) -> bool:
+PHRASE_LEFTOVER_RATIO = 0.75   # 去掉套话之后剩下的字数不超过套话本身的这个比例，才算“整句就是套话”
+PHRASE_NO_SPEECH_PROB = 0.3    # 句子里带套话时，没人说话的概率超过这个就丢（比一般的 0.6 严）
+
+
+def _phrase_split(norm: str) -> tuple[int, int]:
+    """(命中的套话共多少字, 去掉套话后剩多少字)。"""
+    rest = norm
+    for p in sorted(_PHRASES_NORM, key=len, reverse=True):
+        if p and p in rest:
+            rest = rest.replace(p, "")
+    return len(norm) - len(rest), len(rest)
+
+
+def contains_hallucination_phrase(text: str) -> bool:
     norm = normalize(text)
     return any(p in norm for p in _PHRASES_NORM)
+
+
+def is_hallucination_phrase(text: str) -> bool:
+    """整句基本上就是一句套话（“ご視聴ありがとうございました”“Thanks for watching!”）。
+
+    只是句子里含有套话不算：主播真的会说“感谢观看，我们下期再见”或“这个字幕由我们自己翻译”，
+    那是正常的话，不能因此丢掉整条字幕。
+    """
+    matched, leftover = _phrase_split(normalize(text))
+    return matched > 0 and leftover <= matched * PHRASE_LEFTOVER_RATIO
 
 
 def keep_segment(seg: Segment) -> bool:
@@ -57,6 +91,9 @@ def keep_segment(seg: Segment) -> bool:
         return False
     if is_hallucination_phrase(text):
         return False
+    if contains_hallucination_phrase(text) and (
+            seg.no_speech_prob > PHRASE_NO_SPEECH_PROB or seg.avg_logprob < LOGPROB_THRESHOLD):
+        return False  # 带套话、又不像在说话（或没把握）：多半是编出来的
     return True
 
 

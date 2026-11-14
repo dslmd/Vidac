@@ -42,7 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--translate-model", default=None,
                    help="openai 引擎的模型名（默认 qwen2.5:7b）")
     p.add_argument("--target-lang", default=None,
-                   help="翻译目标语言：zh、zh-tw、en、ja、ko 等（默认 zh）")
+                   help="翻译目标语言：zh、zh-tw、en、ja、ko 等（默认跟随系统语言，读不到就用 en）")
     p.add_argument("--no-translate", action="store_true", help="不翻译，只显示原文字幕")
     p.add_argument("--retranslate", action="store_true", help="删除译文缓存，重新翻译")
     p.add_argument("--glossary", metavar="FILE", help="术语表文件，覆盖其他位置的同名条目")

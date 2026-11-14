@@ -53,7 +53,7 @@ swiftc -O -parse-as-library -swift-version 5 \
   -import-objc-header macos/MPVBridge.h \
   -I "$MPV_PREFIX/include" -L "$MPV_PREFIX/lib" -lmpv \
   -Xlinker -rpath -Xlinker "$MPV_PREFIX/lib" \
-  -framework AppKit -framework OpenGL -framework QuartzCore -framework UniformTypeIdentifiers \
+  -framework AppKit -framework OpenGL -framework QuartzCore -framework UniformTypeIdentifiers -framework MediaPlayer \
   macos/*.swift -o "$APP/Contents/MacOS/Vidac"
 printf '%s\n' "$RUNTIME" > "$APP/Contents/Resources/runtime-path.txt"
 cp assets/Vidac.icns "$APP/Contents/Resources/Vidac.icns"
