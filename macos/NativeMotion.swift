@@ -21,9 +21,13 @@ final class SleekSliderCell: NSSliderCell {
         let diameter: CGFloat = isHighlighted ? 14 : 12
         let knob = NSRect(x: knobRect.midX - diameter / 2, y: knobRect.midY - diameter / 2, width: diameter, height: diameter)
         NSGraphicsContext.saveGraphicsState()
-        let shadow = NSShadow(); shadow.shadowColor = NSColor.black.withAlphaComponent(0.35); shadow.shadowBlurRadius = 3; shadow.shadowOffset = NSSize(width: 0, height: -0.5)
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.35)
+        shadow.shadowBlurRadius = 3
+        shadow.shadowOffset = NSSize(width: 0, height: -0.5)
         shadow.set()
-        NSColor.white.setFill(); NSBezierPath(ovalIn: knob).fill()
+        NSColor.white.setFill()
+        NSBezierPath(ovalIn: knob).fill()
         NSGraphicsContext.restoreGraphicsState()
     }
 }
@@ -37,10 +41,17 @@ final class PlaybackButton: NSButton {
         super.updateTrackingAreas()
         if let rollover { removeTrackingArea(rollover) }
         let area = NSTrackingArea(rect: bounds, options: [.activeInKeyWindow, .inVisibleRect, .mouseEnteredAndExited], owner: self)
-        addTrackingArea(area); rollover = area
+        addTrackingArea(area)
+        rollover = area
     }
-    override func mouseEntered(with event: NSEvent) { pointerInside = true; needsDisplay = true }
-    override func mouseExited(with event: NSEvent) { pointerInside = false; needsDisplay = true }
+    override func mouseEntered(with event: NSEvent) {
+        pointerInside = true
+        needsDisplay = true
+    }
+    override func mouseExited(with event: NSEvent) {
+        pointerInside = false
+        needsDisplay = true
+    }
     override func draw(_ dirtyRect: NSRect) {
         if pointerInside || isHighlighted {
             NSColor.white.withAlphaComponent(isHighlighted ? 0.16 : 0.085).setFill()

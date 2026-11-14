@@ -37,16 +37,23 @@ struct TrackpadScrollReducer {
     private var lastEmissionTime: TimeInterval?
 
     mutating func reset() {
-        axis = nil; isActive = false
-        undecidedX = 0; undecidedY = 0; total = 0; emittedTotal = 0
+        axis = nil
+        isActive = false
+        undecidedX = 0
+        undecidedY = 0
+        total = 0
+        emittedTotal = 0
         hasEmitted = false
         permittedTotal = nil
-        lastEventTime = nil; lastEmissionTime = nil
+        lastEventTime = nil
+        lastEmissionTime = nil
     }
 
-    mutating func consume(deltaX: Double, deltaY: Double, precise: Bool,
-                          timestamp: TimeInterval, phase: TrackpadScrollPhase,
-                          momentum: Bool = false) -> TrackpadScrollUpdate? {
+    mutating func consume(
+        deltaX: Double, deltaY: Double, precise: Bool,
+        timestamp: TimeInterval, phase: TrackpadScrollPhase,
+        momentum: Bool = false
+    ) -> TrackpadScrollUpdate? {
         guard timestamp.isFinite else { return nil }
         // Inertia never contributes movement. Its first event can finish the
         // real finger's pending tail if a driver omitted phase=.ended.
@@ -55,13 +62,17 @@ struct TrackpadScrollReducer {
         if phase == .began { reset() }
         if phase == .none, let lastEventTime, timestamp - lastEventTime > unphasedGap { reset() }
         if isActive && self.precise != precise { reset() }
-        if !isActive { isActive = true; self.precise = precise }
+        if !isActive {
+            isActive = true
+            self.precise = precise
+        }
         self.lastEventTime = timestamp
 
         let x = deltaX.isFinite ? deltaX : 0
         let y = deltaY.isFinite ? deltaY : 0
         if axis == nil {
-            undecidedX += x; undecidedY += y
+            undecidedX += x
+            undecidedY += y
             let minimum = precise ? intentThreshold : 0.001
             if abs(undecidedX) >= minimum && abs(undecidedX) >= abs(undecidedY) * dominanceRatio {
                 axis = .horizontal
@@ -74,7 +85,8 @@ struct TrackpadScrollReducer {
                 // sudden jump when the gesture first becomes recognized.
                 let adjusted = precise ? movement - (movement < 0 ? -intentThreshold : intentThreshold) : movement
                 accumulate(adjusted)
-                undecidedX = 0; undecidedY = 0
+                undecidedX = 0
+                undecidedY = 0
             }
         } else {
             accumulate(axis == .horizontal ? x : y)
@@ -100,11 +112,16 @@ struct TrackpadScrollReducer {
         let result: TrackpadScrollUpdate?
         if let axis {
             if cancelled {
-                result = TrackpadScrollUpdate(axis: axis, delta: 0, total: emittedTotal,
-                                              isFirst: !hasEmitted,
-                                              isFinal: true, cancelled: true)
-            } else { result = emit(final: true, cancelled: false) }
-        } else { result = nil }
+                result = TrackpadScrollUpdate(
+                    axis: axis, delta: 0, total: emittedTotal,
+                    isFirst: !hasEmitted,
+                    isFinal: true, cancelled: true)
+            } else {
+                result = emit(final: true, cancelled: false)
+            }
+        } else {
+            result = nil
+        }
         reset()
         return result
     }
@@ -114,7 +131,8 @@ struct TrackpadScrollReducer {
     /// hidden overshoot from producing a dead zone when reversing at an edge.
     mutating func constrainTotal(minimum: Double, maximum: Double) {
         guard let axis, minimum.isFinite, maximum.isFinite,
-              minimum <= 0, maximum >= 0 else { return }
+            minimum <= 0, maximum >= 0
+        else { return }
         let cap = axis == .horizontal ? maximumSeekPerGesture : maximumVolumePerGesture
         let lower = max(-cap, minimum), upper = min(cap, maximum)
         guard lower <= upper else { return }
@@ -136,14 +154,16 @@ struct TrackpadScrollReducer {
         let limit = axis == .horizontal ? maximumSeekPerGesture : maximumVolumePerGesture
         // Clamp the accumulator itself so reversing at the limit responds
         // immediately instead of spending time cancelling invisible overshoot.
-        total = min(permittedTotal?.upperBound ?? limit,
-                    max(permittedTotal?.lowerBound ?? -limit, total + addition))
+        total = min(
+            permittedTotal?.upperBound ?? limit,
+            max(permittedTotal?.lowerBound ?? -limit, total + addition))
     }
     private mutating func emit(final: Bool, cancelled: Bool) -> TrackpadScrollUpdate? {
         guard let axis else { return nil }
-        let update = TrackpadScrollUpdate(axis: axis, delta: total - emittedTotal,
-                                         total: total, isFirst: !hasEmitted,
-                                         isFinal: final, cancelled: cancelled)
+        let update = TrackpadScrollUpdate(
+            axis: axis, delta: total - emittedTotal,
+            total: total, isFirst: !hasEmitted,
+            isFinal: final, cancelled: cancelled)
         emittedTotal = total
         hasEmitted = true
         return update
@@ -171,11 +191,17 @@ struct PinchZoomReducer {
         let lower = minimum ?? minimumScale
         let upper = maximum ?? maximumScale
         if lower.isFinite && upper.isFinite && lower > 0 && upper >= lower {
-            minimumScale = lower; maximumScale = upper
-        } else { minimumScale = 0.5; maximumScale = 3 }
+            minimumScale = lower
+            maximumScale = upper
+        } else {
+            minimumScale = 0.5
+            maximumScale = 3
+        }
         self.scale = bounded(scale.isFinite ? scale : 1)
         initialScale = self.scale
-        pendingMagnification = 0; recognized = false; isActive = true
+        pendingMagnification = 0
+        recognized = false
+        isActive = true
     }
     mutating func consume(magnification: Double) -> Double? {
         guard isActive, magnification.isFinite else { return nil }
@@ -195,16 +221,22 @@ struct PinchZoomReducer {
     }
     mutating func change(magnification: Double) -> Double? { consume(magnification: magnification) }
     mutating func end(cancelled: Bool = false) -> Double? {
-        guard isActive else { return nil }; isActive = false
-        if cancelled { scale = initialScale; return scale }
+        guard isActive else { return nil }
+        isActive = false
+        if cancelled {
+            scale = initialScale
+            return scale
+        }
         guard recognized else { return nil }
         if minimumScale <= 1 && maximumScale >= 1 && abs(scale - 1) <= resetSnapTolerance { scale = 1 }
         return scale
     }
     mutating func reset(scale: Double = 1) {
         self.scale = bounded(scale.isFinite ? scale : 1)
-        initialScale = self.scale; pendingMagnification = 0
-        recognized = false; isActive = false
+        initialScale = self.scale
+        pendingMagnification = 0
+        recognized = false
+        isActive = false
     }
     private func bounded(_ value: Double) -> Double { min(maximumScale, max(minimumScale, value)) }
 }

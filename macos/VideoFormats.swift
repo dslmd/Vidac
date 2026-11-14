@@ -15,7 +15,7 @@ enum VideoFormats {
     /// are not audio-visual (for example PostScript for .ps) are left alone.
     static var contentTypes: [UTType] {
         var identifiers = Set(documentTypes.flatMap { $0["LSItemContentTypes"] as? [String] ?? [] })
-        identifiers.subtract(["public.movie", "public.video"]) // abstract parents cannot be assigned
+        identifiers.subtract(["public.movie", "public.video"])  // abstract parents cannot be assigned
         var types = identifiers.compactMap { UTType($0) }
         for name in extensions {
             for type in UTType.types(tag: name, tagClass: .filenameExtension, conformingTo: nil)
@@ -35,7 +35,11 @@ enum VideoFormats {
         for type in types {
             group.enter()
             NSWorkspace.shared.setDefaultApplication(at: application, toOpen: type) { error in
-                if error != nil { lock.lock(); failed.append(type.identifier); lock.unlock() }
+                if error != nil {
+                    lock.lock()
+                    failed.append(type.identifier)
+                    lock.unlock()
+                }
                 group.leave()
             }
         }
