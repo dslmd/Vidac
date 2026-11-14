@@ -1,14 +1,37 @@
 # Vidac
 
+English | [简体中文](README.zh-CN.md)
+
 A native macOS video player with on-device transcription and bilingual subtitles.
 
 Vidac is a native video player for Apple Silicon Macs. Open a file to play it; speech is recognized in the background to generate subtitles, which Apple Intelligence can translate into bilingual subtitles.
 
+## Download
+
+Download the latest disk image from [GitHub Releases](https://github.com/dslmd/Vidac/releases/latest).
+
 ## Usage
 
-The portable build targets **Apple Silicon (M-series) and macOS 26.2 or later**. Drag `Vidac.app` from the release package into Applications and open it. The player, audio tools and Python subtitle runtime ship with the app, so recipients do not need to install Homebrew or Python. The recognition model must be downloaded on first use, which requires an internet connection; after that it works offline. For the compatibility and verification scope of the actual release package, see the [release notes](docs/RELEASING.md).
+Vidac requires **Apple Silicon (M-series) and macOS 26.2 or later**.
 
-Official release packages should be signed with a Developer ID and notarized by Apple (`scripts/release.sh`). Packages with `-unnotarized` in the file name are only locally signed; after downloading one from the internet, you must allow it manually in "System Settings → Privacy & Security" the first time you open it.
+1. Download `Vidac-<version>-arm64-unnotarized.dmg` from the release page.
+2. Open the disk image and drag `Vidac` into the Applications folder.
+3. Open Vidac from Applications.
+
+The player, audio tools and Python subtitle runtime ship with the app, so you do not need to install Homebrew or Python. Speech-recognition models are not included in the download: the first time you generate subtitles, Vidac downloads the model automatically from Hugging Face (the default is the "base" model), which requires an internet connection; after that, subtitles work offline. For the compatibility and verification scope of the actual release package, see the [release notes](docs/RELEASING.md).
+
+### First open of an un-notarized build
+
+Current builds are only ad-hoc signed and are not yet notarized by Apple, which is why the file name contains `-unnotarized`. The first time you open one, macOS blocks it. To allow it:
+
+1. Try to open Vidac once and dismiss the warning.
+2. Open "System Settings → Privacy & Security".
+3. Scroll down to the message about Vidac being blocked and click "Open Anyway".
+4. Confirm, and Vidac opens. You only need to do this once.
+
+Once builds are signed with a Developer ID and notarized by Apple (`scripts/release.sh`), the disk image will be named `Vidac-<version>-arm64.dmg` and these steps will no longer be needed.
+
+### Playback
 
 - Choose "Open Video…", press `⌘O`, or drag a local video into the window.
 - Press Space to play or pause, and `F` to toggle full screen.

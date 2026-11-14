@@ -83,38 +83,29 @@ CPython and the packages below are in `Contents/Frameworks/Python.framework` and
 | httpx2 | 2.16.0 | BSD-3-Clause |
 | huggingface_hub | 2.4.0 | Apache-2.0 |
 | idna | 3.20 | BSD-3-Clause |
-| Jinja2 | 3.1.6 | BSD License (classifier only; see package metadata for clause count) |
 | llvmlite | 0.50.0 | BSD-2-Clause AND Apache-2.0 WITH LLVM-exception |
-| MarkupSafe | 3.0.4 | BSD-3-Clause |
 | mlx | 0.32.4 | MIT |
 | mlx-metal | 0.32.4 | MIT |
 | mlx-whisper | 0.4.3 | MIT |
 | more-itertools | 11.2.1 | MIT |
-| mpmath | 1.3.0 | BSD |
-| networkx | 3.7 | BSD-3-Clause |
 | numba | 0.68.1 | BSD |
 | numpy | 2.5.4 | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 |
 | packaging | 26.3 | Apache-2.0 OR BSD-2-Clause |
-| pip | 26.3 | MIT |
 | PyYAML | 6.0.3 | MIT |
 | regex | 2026.11.9 | Apache-2.0 AND CNRI-Python |
 | requests | 2.34.2 | Apache-2.0 |
 | scipy | 1.18.1 | BSD (classifier; the metadata License field holds the license text, which also covers bundled third-party components; see the package's `LICENSE.txt`) |
-| setuptools | 84.2.1 | MIT |
-| sympy | 1.14.0 | BSD |
 | tiktoken | 0.14.0 | MIT |
-| torch | 2.15.0 | Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND ISC AND MIT AND Zlib |
 | tqdm | 4.70.1 | MPL-2.0 AND MIT |
 | truststore | 0.10.5 | MIT |
 | typing_extensions | 4.16.0 | PSF-2.0 |
 | urllib3 | 2.8.0 | MIT |
 
-The table covers CPython plus 37 `*.dist-info` packages. Directories such as `functorch`, `torchgen` (part of torch), `_distutils_hack` (part of setuptools), `_yaml`/`yaml` (PyYAML) and `tiktoken_ext` belong to those packages.
+The table covers CPython plus 29 `*.dist-info` packages. Directories such as `_yaml`/`yaml` (PyYAML) and `tiktoken_ext` (tiktoken) belong to those packages. PyTorch (`torch`, `torchgen`, `functorch`) and the packages that were only needed by it or by the build (sympy, mpmath, networkx, Jinja2, MarkupSafe, pip, setuptools) are not bundled; transcription uses MLX. mlx-whisper's model-conversion script `mlx_whisper/torch_whisper.py`, which needs PyTorch, is not included.
 
 Other native code shipped with these packages and with CPython:
 
 - `scipy/.dylibs/` contains `libgfortran`, `libquadmath` and `libgcc_s` from the GCC runtime. scipy's `LICENSE.txt` lists `libgfortran` and `libgcc` as GPL-3.0-or-later WITH GCC-exception-3.1. The license of `libquadmath` is not stated in the files checked, so it is not verified here (upstream GCC libquadmath is LGPL-2.1-or-later).
-- `torch/lib/libomp.dylib` is LLVM OpenMP; torch's bundled third-party license files include `llvm-openmp` (LLVM project license, Apache-2.0 WITH LLVM-exception).
 - `Python.framework` also includes OpenSSL 3 (`libssl.3.dylib`, `libcrypto.3.dylib`), Tcl/Tk 8.6 and SQLite 3.47.2 (library directory names). Their licenses (upstream: Apache-2.0 for OpenSSL 3, the Tcl/Tk license, and public domain for SQLite) were not verified from files in the bundle; they come from the python.org installer.
 - The `mlx` and `mlx-metal` packages include `libmlx.dylib`, `libjaccl.dylib` and `mlx.metallib`, covered by the packages' MIT license.
 
@@ -149,4 +140,4 @@ The native libraries in `Contents/Frameworks/` are redistributed unmodified from
 
 ## Not included
 
-No model weights, media files, or user data are bundled. Whisper models are downloaded by the user on first use and are subject to their own licenses.
+No model weights, media files, or user data are bundled. Whisper speech-recognition models are downloaded automatically from Hugging Face the first time subtitles are generated and are subject to their own licenses.

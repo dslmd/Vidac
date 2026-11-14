@@ -226,6 +226,31 @@ class Relocator:
         return sorted(seen, key=lambda x: len(x.parts), reverse=True)
 
 
+# mlx-whisper declares torch as a dependency but only its model *conversion*
+# script (mlx_whisper/torch_whisper.py) imports it. Transcription runs on MLX,
+# so torch and the packages installed solely for it are left out, as are the
+# installer tools, which the app never runs. Roughly 620 MB.
+UNBUNDLED = [
+    "build", "torch", "torchgen", "functorch", "sympy", "isympy.py", "mpmath", "networkx",
+    "jinja2", "markupsafe", "pip", "setuptools", "pkg_resources", "wheel",
+    "_distutils_hack", "distutils-precedence.pth",
+]
+
+
+def prune_site_packages(site: Path):
+    for name in UNBUNDLED:
+        for path in [site / name, *site.glob(name.replace("_", "[-_]") + "-*.dist-info")]:
+            if path.is_dir():
+                shutil.rmtree(path)
+            elif path.exists():
+                path.unlink()
+    (site / "mlx_whisper/torch_whisper.py").unlink(missing_ok=True)
+    # Numba's optional OpenMP thread pool linked against the libomp that only
+    # torch shipped. Without it Numba uses its built-in "workqueue" pool.
+    for pool in (site / "numba/np/ufunc").glob("omppool*.so"):
+        pool.unlink()
+
+
 IDENTITY = os.environ.get("VIDAC_SIGN_IDENTITY", "-")
 ENTITLEMENTS = PROJECT / "macos/Vidac.entitlements"
 
@@ -284,7 +309,7 @@ def package(args):
             child.unlink() if child.is_file() or child.is_symlink() else shutil.rmtree(child)
     copy_tree(PROJECT / "vidac", runtime / "vidac")
     copy_tree(PROJECT / ".venv/lib/python3.12/site-packages", runtime / "site-packages")
-    shutil.rmtree(runtime / "site-packages/build", ignore_errors=True)  # stray setuptools output, not a package
+    prune_site_packages(runtime / "site-packages")
     bin_dir = runtime / "bin"
     bin_dir.mkdir()
     for name in ["ffmpeg", "ffprobe"]:
@@ -345,7 +370,7 @@ exec "$VIDAC_RUNTIME/bin/python3" -m vidac "$@"
     run(["/usr/bin/codesign", "--verify", "--deep", "--strict", app])
     # The official CPython launcher needs its nested Python.app. Exercise the
     # actual embedded interpreter, not just its dylib load commands.
-    run([bin_dir / "python3", "-c", "import ssl,numpy,mlx.core,mlx_whisper; assert numpy.arange(3).sum() == 3"], env={**os.environ, "PATH": "/usr/bin:/bin"})
+    run([bin_dir / "python3", "-c", "import ssl,sys,numpy,mlx.core,mlx_whisper,mlx_whisper.timing,huggingface_hub; from mlx_whisper.transcribe import transcribe; assert numpy.arange(3).sum() == 3; assert 'torch' not in sys.modules"], env={**os.environ, "PATH": "/usr/bin:/bin"})
     print(f"Portable app: {app}", flush=True)
     if not args.no_archive:
         archive = app.parent / f"Vidac-{info['CFBundleShortVersionString']}-arm64.zip"
