@@ -26,13 +26,13 @@ func fail(_ message: String, code: Int32) -> Never {
 func describe(_ reason: SystemLanguageModel.Availability.UnavailableReason) -> String {
     switch reason {
     case .deviceNotEligible:
-        return "这台 Mac 不支持 Apple Intelligence"
+        return "This Mac does not support Apple Intelligence"
     case .appleIntelligenceNotEnabled:
-        return "Apple Intelligence 没有开启（系统设置里打开）"
+        return "Apple Intelligence is turned off (enable it in System Settings)"
     case .modelNotReady:
-        return "Apple Intelligence 模型还没下载好"
+        return "The Apple Intelligence model has not finished downloading"
     @unknown default:
-        return "Apple Intelligence 不可用"
+        return "Apple Intelligence is unavailable"
     }
 }
 
@@ -46,7 +46,7 @@ struct AppleTranslate {
         case .unavailable(let reason):
             fail(describe(reason), code: 2)
         @unknown default:
-            fail("Apple Intelligence 不可用", code: 2)
+            fail("Apple Intelligence is unavailable", code: 2)
         }
         if CommandLine.arguments.contains("--check") {
             print("ok")
@@ -55,7 +55,7 @@ struct AppleTranslate {
 
         let data = FileHandle.standardInput.readDataToEndOfFile()
         guard let req = try? JSONDecoder().decode(Request.self, from: data) else {
-            fail("输入不是合法的 JSON", code: 4)
+            fail("Input is not valid JSON", code: 4)
         }
 
         let session = LanguageModelSession(instructions: req.instructions)
@@ -68,9 +68,9 @@ struct AppleTranslate {
             exit(0)
         } catch let error as LanguageModelSession.GenerationError {
             // 安全护栏、上下文超长、语言不支持等。调用方会拆小这一批再试。
-            fail("生成失败：\(error)", code: 3)
+            fail("Generation failed: \(error)", code: 3)
         } catch {
-            fail("出错：\(error)", code: 1)
+            fail("Error: \(error)", code: 1)
         }
     }
 }

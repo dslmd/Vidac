@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import logging
+import math
+import os
 import queue
 import subprocess
 import sys
@@ -60,15 +62,16 @@ def _esc(s: str) -> str:
     return s.replace("{", "｛").replace("}", "｝")
 
 
-def subtitle_ass(lines: list[str], scale: float) -> str:
+def subtitle_ass(lines: list[str], scale: float, bottom_margin: float = 110) -> str:
     fs = round(BASE_FONT * scale)
     parts = []
     for i, line in enumerate(lines):
         color = WHITE if i == 0 else YELLOW
         size = fs if i == 0 else round(fs * 0.8)
         parts.append(f"{{\\fs{size}\\c&H{color}&}}{_esc(line)}")
-    # 底部居中，离底边 110px，给 mpv 自带的控制条留位置
-    return f"{{\\an2\\pos({W // 2},{H - 110})\\fs{fs}\\bord2\\shad0\\3c&H000000&}}" + "\\N".join(parts)
+    # 原生宿主按窗口尺寸预留 HUD 空间；终端播放器仍默认离底边 110px。
+    y = H - bottom_margin
+    return f"{{\\an2\\pos({W // 2},{y:g})\\fs{fs}\\bord2\\shad0\\3c&H000000&}}" + "\\N".join(parts)
 
 
 def status_ass(lines: list[str]) -> str:
@@ -142,6 +145,9 @@ def cue_lines(cues: list[Cue], mode: str) -> list[str]:
 class App:
     def __init__(self, args) -> None:
         self.args = args
+        self.native_ui = os.environ.get("VIDAC_NATIVE_UI") == "1"
+        self.subtitle_bottom_margin = 230.0 if self.native_ui else 110.0
+        self._skip_initial_resume = os.environ.get("VIDAC_KEEP_CURRENT_POSITION") == "1"
         self.settings = Settings.from_args(args)
         self.events: queue.Queue = queue.Queue()
         self.positions = PositionStore(app_dir() / "positions.json")
@@ -156,7 +162,7 @@ class App:
         self.retranslate = bool(args.retranslate or args.rebuild)
         self._hints: dict[str, tuple[str, float]] = {}   # 提示类状态行：键 -> (文字, 首次出现时间)
         self._hints_lock = threading.Lock()
-        self.help_until = time.monotonic() + 8
+        self.help_until = 0.0 if self.native_ui else time.monotonic() + 8
         self.last_sub_text: Optional[str] = None
         self.last_status: Optional[list[str]] = None
         self.last_status_draw = 0.0
@@ -205,7 +211,18 @@ class App:
         def _on_aid(_name, value):
             self.events.put(("aid", value))
 
+        if self.native_ui:
+            @p.property_observer("user-data/vidac-subtitle-bottom")
+            def _on_subtitle_bottom(_name, value):
+                self.events.put(("native_subtitle_bottom", value))
+
         p.event_callback("file-loaded")(lambda _ev: self.events.put(("loaded",)))
+        p.event_callback("client-message")(self._on_native_message)
+
+    def _on_native_message(self, event: dict) -> None:
+        args = event.get("args") or []
+        if len(args) == 4 and args[:2] == ["vidac-ui", "setting"]:
+            self.events.put(("native_setting", args[2], args[3]))
 
     # ---- 主循环 ----
     def run(self) -> None:
@@ -253,6 +270,7 @@ class App:
         kind = ev[0]
         if kind == "open":
             self._open(ev[1])
+            self._sync_attached_file_loaded(ev[1])
         elif kind == "loaded":
             self._on_file_loaded()
         elif kind == "aid":
@@ -283,6 +301,18 @@ class App:
                 self._open_menu()
         elif kind == "menu":
             self._menu_action(ev[1])
+        elif kind == "native_setting":
+            self._native_setting(ev[1], ev[2])
+        elif kind == "native_subtitle_bottom":
+            try:
+                margin = float(ev[1])
+            except (TypeError, ValueError):
+                return
+            if math.isfinite(margin):
+                margin = min(300.0, max(110.0, margin))
+                if margin != self.subtitle_bottom_margin:
+                    self.subtitle_bottom_margin = margin
+                    self.last_sub_text = None
         elif kind == "cycle_audio":
             # 不用 mpv 的 cycle audio：它会先切到“无音轨”（aid=no），这里直接轮换到下一条
             if self.video is not None and len(self.tracks) > 1:
@@ -326,8 +356,22 @@ class App:
             pass
         self._start_workers()
 
+    def _sync_attached_file_loaded(self, path: str) -> None:
+        """附着可能晚于 file-loaded；用已就绪的当前文件补回该事件。"""
+        if not getattr(self.player, "_attached", False) or self.video is None:
+            return
+        if self.player.path != path:
+            return
+        if self.player.idle_active is False and self.player.time_pos is not None:
+            self._on_file_loaded()
+
     def _on_file_loaded(self) -> None:
+        if self.file_ready:
+            return
         self.file_ready = True
+        if getattr(self, "_skip_initial_resume", False):
+            self._skip_initial_resume = False
+            return  # 原生宿主恢复字幕控制器时保留当前正在播放的位置。
         if self.video is None:
             return
         pos = self.positions.get(self.video)
@@ -548,6 +592,45 @@ class App:
         self.settings.set("font_scale", new)
         self.last_sub_text = None
 
+    def _native_setting(self, key: str, value: str) -> None:
+        """来自原生设置面板的有限值协议；工作仍由后台线程完成。"""
+        choices = {
+            "display_mode": DISPLAY_MODES,
+            "target_lang": TARGET_CHOICES,
+            "language": LANGUAGE_CHOICES,
+            "model": tuple(MODEL_PRESETS),
+        }
+        if key in choices:
+            if value not in choices[key]:
+                return
+        elif key == "translate":
+            if value not in ("true", "false"):
+                return
+            value = value == "true"
+        elif key == "font_scale":
+            try:
+                scale = float(value)
+            except (TypeError, ValueError):
+                return
+            if not math.isfinite(scale):
+                return
+            self._set_scale(scale)
+            return
+        else:
+            return
+        if self.settings.get(key) == value:
+            return
+        self.settings.set(key, value)
+        if key == "display_mode":
+            self.last_sub_text = None
+        elif key == "translate":
+            if self.translator is not None:
+                self.translator.enabled = value
+        elif key == "target_lang":
+            self._restart_translator()
+        elif key in ("language", "model"):
+            self._restart_workers()
+
     def _speed(self) -> float:
         """mpv 当前倍速（用户用 [ ] 改过也对）；读不到按 1 倍。"""
         try:
@@ -627,7 +710,8 @@ class App:
         if text != self.last_sub_text:
             self.last_sub_text = text
             if text:
-                self._overlay(SUB_ID, subtitle_ass(text.split("\n"), self.settings.get("font_scale")))
+                self._overlay(SUB_ID, subtitle_ass(text.split("\n"), self.settings.get("font_scale"),
+                                                   self.subtitle_bottom_margin))
             else:
                 self._clear(SUB_ID)
 
@@ -637,7 +721,10 @@ class App:
             lines = self._status_lines()
             if lines != self.last_status:
                 self.last_status = lines
-                if lines:
+                if self.native_ui:
+                    self.player.set("user-data/vidac-status", " · ".join(lines))
+                    self._clear(STATUS_ID)
+                elif lines:
                     self._overlay(STATUS_ID, status_ass(lines))
                 else:
                     self._clear(STATUS_ID)
@@ -661,6 +748,11 @@ class App:
         if apple and tr.status == "offline":
             return f"翻译不可用：{tr.error_msg}。只显示原文"
         if tr.status == "ok":
+            failed = len(getattr(tr, "_failed", ()))
+            ts = self.transcriber
+            source_finished = ts is not None and (ts.complete or ts.error is not None)
+            if failed and source_finished and tr.translated + failed >= tr.total:
+                return f"翻译完成 · {tr.translated}/{tr.total} · {failed}句保留原文"
             return f"翻译 {lang_name_zh(tr.target)} · {model} · {tr.translated}/{tr.total}"
         if tr.status == "offline":
             return "翻译服务未连接，只显示原文"
@@ -674,7 +766,8 @@ class App:
         tr, ts = self.translator, self.transcriber
         if tr is None or tr.status != "ok":
             return False
-        if tr.translated < tr.total:
+        attempted = tr.translated + len(getattr(tr, "_failed", ()))
+        if attempted < tr.total:
             return True
         return ts is not None and not ts.complete and ts.error is None
 
@@ -724,7 +817,7 @@ class App:
                 lines.append(translate_line)
             elif self._hint("translate", translate_line, now, seen):
                 lines.append(translate_line)
-        if self.video is None and not err_shown:
+        if self.video is None and not err_shown and not self.native_ui:
             lines.append("把视频拖进窗口，或按 o 打开")
         if now < self.help_until:
             lines.append(HELP_TEXT)

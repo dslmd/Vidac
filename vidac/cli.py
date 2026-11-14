@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -77,7 +78,7 @@ def main(argv: list[str] | None = None) -> None:
             return
         # 已有窗口在运行：把文件交给它，本进程直接退出
         abs_path = str(Path(args.video).expanduser().resolve())
-        if ipc.send_loadfile(abs_path):
+        if not os.environ.get("VIDAC_ATTACH_SOCKET") and ipc.send_loadfile(abs_path):
             sys.exit(0)
     elif args.list_tracks:
         parser.error("--list-tracks 需要指定视频文件")

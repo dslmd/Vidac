@@ -3,6 +3,9 @@
 为什么不用 libmpv（python-mpv）：macOS 要求窗口事件循环跑在进程主线程上，
 Python 进程里用 libmpv 开窗口很容易不出窗口或卡死。直接启动 mpv 程序，它自己就是
 完整的 Mac 应用：窗口、菜单栏、拖拽、触控板手势都是原生的。我们只发命令、收事件。
+
+原生 Vidac App 由 Swift 在主线程持有 libmpv；VIDAC_ATTACH_SOCKET 模式只附着它的
+IPC，不创建窗口，也不拥有或结束该宿主。
 """
 
 from __future__ import annotations
@@ -68,7 +71,12 @@ class MPV:
 
     def __init__(self, sock_path: str, **options: Any) -> None:
         object.__setattr__(self, "core_shutdown", False)
-        if socket_alive(sock_path):
+        self._attached = bool(os.environ.get("VIDAC_ATTACH_SOCKET"))
+        self._terminating = False
+        if self._attached:
+            # 原生 App 已在主线程创建 libmpv；这里只拥有一条 IPC 连接。
+            sock_path = os.environ["VIDAC_ATTACH_SOCKET"]
+        elif socket_alive(sock_path):
             sock_path = f"{sock_path}.{os.getpid()}"  # 已有一个窗口在用默认路径
         else:
             try:
@@ -84,13 +92,17 @@ class MPV:
         self._sections: dict[str, dict[str, Callable]] = {}
         self._dispatch: queue.Queue = queue.Queue()
 
-        cmd = [find_mpv(), f"--input-ipc-server={sock_path}", "--input-terminal=no",
-               "--terminal=no", *(_opt(k, v) for k, v in options.items())]
-        log.debug("启动 mpv：%s", cmd)
-        try:
-            proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL)
-        except OSError as exc:
-            raise MpvError(f"mpv 启动失败：{exc}") from exc
+        proc = None
+        if self._attached:
+            log.info("连接原生播放器的字幕控制接口")
+        else:
+            cmd = [find_mpv(), f"--input-ipc-server={sock_path}", "--input-terminal=no",
+                   "--terminal=no", *(_opt(k, v) for k, v in options.items())]
+            log.debug("启动 mpv：%s", cmd)
+            try:
+                proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL)
+            except OSError as exc:
+                raise MpvError(f"mpv 启动失败：{exc}") from exc
         object.__setattr__(self, "proc", proc)
         atexit.register(self.terminate)
 
@@ -102,7 +114,7 @@ class MPV:
     def _connect(self) -> socket.socket:
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
-            if self.proc.poll() is not None:
+            if self.proc is not None and self.proc.poll() is not None:
                 raise MpvError(f"mpv 启动后立刻退出了（退出码 {self.proc.returncode}），"
                                "可以在终端里运行 mpv 看报错")
             s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -112,7 +124,8 @@ class MPV:
             except OSError:
                 s.close()
                 time.sleep(0.05)
-        self._kill()
+        if not self._attached:
+            self._kill()
         raise MpvError("连不上 mpv 的控制接口")
 
     def _reader(self) -> None:
@@ -275,6 +288,8 @@ class MPV:
             pass
 
     def _kill(self) -> None:
+        if self._attached:
+            return
         proc = self.proc
         if proc.poll() is None:
             proc.kill()
@@ -285,6 +300,21 @@ class MPV:
             pass
 
     def terminate(self) -> None:
+        if self._terminating:
+            return
+        self._terminating = True
+        if self._attached:
+            # 关闭控制器不能结束原生窗口，也不能删除宿主拥有的 socket。
+            object.__setattr__(self, "core_shutdown", True)
+            sock = self.__dict__.get("_sock")
+            if sock is None:
+                return  # 连接失败后的 atexit 清理
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            sock.close()
+            return
         proc = self.proc
         if proc.poll() is None:
             try:

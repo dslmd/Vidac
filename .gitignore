@@ -7,3 +7,15 @@ samples/
 *.srt.tmp
 build/
 bin/
+dist/
+.DS_Store
+.env
+.env.*
+!.env.example
+*.log
+*.app/
+*.bundle-backup/
+*.vidac.json
+*.vidac.json.tmp
+.release-cache/
+.venv
